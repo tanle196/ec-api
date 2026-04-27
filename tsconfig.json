@@ -22,7 +22,8 @@
         "./src/*"
       ]
     },
-    "incremental": true,
+    // Để build nhanh hơn , hãy bật true , cần xoá cache build nếu không sẽ lỗi
+    "incremental": false,
     "skipLibCheck": true,
     "strictNullChecks": true,
     "forceConsistentCasingInFileNames": true,
