@@ -57,6 +57,55 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+## Run docker
+ ---
+  Cấu trúc files
+
+  ec-api/
+  ├── Dockerfile                  # Multi-stage: deps → build → production / development
+  ├── .dockerignore
+  ├── docker-compose.yml          # Local dev (hot-reload)
+  ├── docker-compose.staging.yml  # Staging (production build)
+  ├── docker-compose.prod.yml     # Production (với image tag)
+  ├── .env.example                # Template commit lên git
+  ├── .env.development                  # Local (bị gitignore)
+  ├── .env.staging                # Staging (bị gitignore)
+  ├── .env.production             # Production (bị gitignore)
+  └── src/app.module.ts           # Đọc DB config từ env vars
+
+  ---
+  Các lệnh chạy
+
+  docker ps                # xem container
+  docker logs -f app       # xem log
+  docker exec -it app sh   # vào container
+  docker compose build     # build lại
+  docker compose down -v   # xoá luôn volume
+
+  Local (dev với hot-reload):
+  docker compose up
+
+  Staging:
+  docker compose -f docker-compose.staging.yml up --build
+
+  Production
+  docker compose -f docker-compose.prod.yml up --build
+
+  ---
+  Điểm quan trọng
+
+  ┌──────────────────────┬───────────────────┬────────────┬────────────┐
+  │                      │       Local       │  Staging   │ Production │
+  ├──────────────────────┼───────────────────┼────────────┼────────────┤
+  │ Build target         │ development       │ production │ production │
+  ├──────────────────────┼───────────────────┼────────────┼────────────┤
+  │ Hot-reload           │ Có (volume mount) │ Không      │ Không      │
+  ├──────────────────────┼───────────────────┼────────────┼────────────┤
+  │ synchronize TypeORM  │ true              │ true       │ false      │
+  ├──────────────────────┼───────────────────┼────────────┼────────────┤
+  │ Port Postgres expose │ 5432              │ Không      │ Không      │
+  └──────────────────────┴───────────────────┴────────────┴────────────┘
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
