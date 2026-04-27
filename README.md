@@ -34,7 +34,7 @@ $ npm install
 ## Compile and run the project
 
 ```bash
-# development
+# local
 $ npm run start
 
 # watch mode
@@ -62,13 +62,13 @@ $ npm run test:cov
   Cấu trúc files
 
   ec-api/
-  ├── Dockerfile                  # Multi-stage: deps → build → production / development
+  ├── Dockerfile                  # Multi-stage: deps → build → production / local
   ├── .dockerignore
   ├── docker-compose.yml          # Local dev (hot-reload)
   ├── docker-compose.staging.yml  # Staging (production build)
   ├── docker-compose.prod.yml     # Production (với image tag)
   ├── .env.example                # Template commit lên git
-  ├── .env.development                  # Local (bị gitignore)
+  ├── .env.local                  # Local (bị gitignore)
   ├── .env.staging                # Staging (bị gitignore)
   ├── .env.production             # Production (bị gitignore)
   └── src/app.module.ts           # Đọc DB config từ env vars
@@ -97,7 +97,7 @@ $ npm run test:cov
   ┌──────────────────────┬───────────────────┬────────────┬────────────┐
   │                      │       Local       │  Staging   │ Production │
   ├──────────────────────┼───────────────────┼────────────┼────────────┤
-  │ Build target         │ development       │ production │ production │
+  │ Build target         │ local       │ production │ production │
   ├──────────────────────┼───────────────────┼────────────┼────────────┤
   │ Hot-reload           │ Có (volume mount) │ Không      │ Không      │
   ├──────────────────────┼───────────────────┼────────────┼────────────┤

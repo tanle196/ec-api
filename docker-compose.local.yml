@@ -1,13 +1,13 @@
-# docker-compose.staging.yml
+# docker-compose.local.yml
 services:
 
   postgres:
     image: postgres:17-alpine
-    env_file: .env.staging
+    env_file: .env.local
     ports:
       - "5432:5432"
     volumes:
-      - postgres_staging:/var/lib/postgresql/data
+      - postgres_local:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
       interval: 5s
@@ -15,5 +15,5 @@ services:
       retries: 5
 
 volumes:
-  postgres_staging:
+  postgres_local:
   node_modules:

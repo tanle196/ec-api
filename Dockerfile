@@ -21,10 +21,10 @@ COPY --from=build /app/dist ./dist
 EXPOSE 3000
 CMD ["node", "dist/main"]
 
-# Stage 4: development (default for local)
-FROM node:22-alpine AS development
+# Stage 4: local (default for local)
+FROM node:22-alpine AS local
 WORKDIR /app
-ENV NODE_ENV=development
+ENV NODE_ENV=local
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 EXPOSE 3000

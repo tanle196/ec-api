@@ -1,14 +1,17 @@
-// dto/update-user.dto.ts
-import { PartialType } from '@nestjs/mapped-types';
-import { CreateUserDto } from './create-user.dto';
+import { PartialType } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsBoolean, IsIn } from 'class-validator';
+import { CreateUserDto } from './create-user.dto';
 import type { UserRole } from '../entities/user.entity';
 
 export class UpdateUserDto extends PartialType(CreateUserDto) {
-    @IsOptional()
-    @IsBoolean()
-    is_active?: boolean;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean;
 
-    @IsOptional()
-    role?: UserRole;
+  @ApiPropertyOptional({ enum: ['customer', 'admin', 'staff'] })
+  @IsOptional()
+  @IsIn(['customer', 'admin', 'staff'])
+  role?: UserRole;
 }
