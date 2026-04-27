@@ -3,7 +3,7 @@ dist
 .git
 .gitignore
 *.md
-.env.development
+.env.local
 .env.staging
 .env.production
 coverage
