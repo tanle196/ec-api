@@ -9,7 +9,7 @@ type SafeUserUpdate = Pick<User, 'fullName' | 'avatar'>;
 export class UsersService {
   constructor(
     @InjectRepository(User) private readonly repo: Repository<User>,
-  ) { }
+  ) {}
 
   findById(id: string): Promise<User | null> {
     return this.repo.findOne({ where: { id } });
@@ -18,8 +18,8 @@ export class UsersService {
   findByEmail(email: string): Promise<User | null> {
     return this.repo.findOne({
       where: { email },
-      relations: ['identities']
-    })
+      relations: ['identities'],
+    });
   }
 
   async update(
@@ -41,27 +41,22 @@ export class UsersService {
   } | null> {
     const user = await this.repo.findOne({
       where: { id },
-      relations: [
-        'roles',
-        'roles.permissions', // load permission trong role
-        'permissions', // load permission gán trực tiếp cho user
-      ],
+      relations: ['roles', 'roles.permissions', 'permissions'],
     });
 
     if (!user) return null;
 
-    // chỉ lấy name của role
     const roleNames = user.roles?.map((r) => r.name) ?? [];
 
-    // gộp quyền từ role
     const rolePermissions =
-      user.roles?.flatMap((r) =>
-        r.permissions?.map((p) => `${p.module}.${p.action}`),
-      ) ?? [];
+      user.roles
+        ?.flatMap((r) => r.permissions?.map((p) => `${p.module}.${p.action}`))
+        .filter((p): p is string => Boolean(p)) ?? [];
 
-    // gộp quyền gán trực tiếp cho user
     const userPermissions =
-      user.permissions?.map((p) => `${p.module}.${p.action}`) ?? [];
+      user.permissions
+        ?.map((p) => `${p.module}.${p.action}`)
+        .filter((p): p is string => Boolean(p)) ?? [];
 
     const allPermissions = Array.from(
       new Set([...rolePermissions, ...userPermissions]),
@@ -74,7 +69,9 @@ export class UsersService {
     };
   }
 
-  findAll() {
-    return this.repo.find();
+  findAll(): Promise<User[]> {
+    return this.repo.find({
+      select: ['id', 'email', 'fullName', 'avatar', 'createdAt'],
+    });
   }
 }

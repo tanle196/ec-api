@@ -1,4 +1,3 @@
-// permissions/permissions.service.ts
 import {
   ConflictException,
   ForbiddenException,
@@ -10,6 +9,7 @@ import { Repository } from 'typeorm';
 import { Permission } from './entities/permission.entity';
 import { CreatePermissionDto } from './dto/create-permission.dto';
 import { UpdatePermissionDto } from './dto/update-permission.dto';
+import { PaginationDto } from '@/common/dto/pagination.dto';
 
 @Injectable()
 export class PermissionsService {
@@ -18,18 +18,12 @@ export class PermissionsService {
     private readonly permissionRepo: Repository<Permission>,
   ) {}
 
-  /**
-   * CREATE permission
-   */
   async create(dto: CreatePermissionDto): Promise<Permission> {
     const existed = await this.permissionRepo.findOne({
-      where: {
-        module: dto.module,
-        action: dto.action,
-      },
+      where: { module: dto.module, action: dto.action },
     });
     if (existed) {
-      throw new ConflictException('Permission đã tồn tại');
+      throw new ConflictException('Permission already exists');
     }
 
     const permission = this.permissionRepo.create({
@@ -42,64 +36,46 @@ export class PermissionsService {
     return this.permissionRepo.save(permission);
   }
 
-  /**
-   * GET all permissions
-   */
-  async findAll(): Promise<Permission[]> {
-    return this.permissionRepo.find({
-      order: {
-        createdAt: 'DESC',
-      },
+  async findAll(
+    pagination: PaginationDto,
+  ): Promise<{ data: Permission[]; total: number }> {
+    const { page = 1, limit = 20 } = pagination;
+    const [data, total] = await this.permissionRepo.findAndCount({
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
     });
+    return { data, total };
   }
 
-  /**
-   * GET permission by id
-   */
   async findOne(id: string): Promise<Permission> {
-    const permission = await this.permissionRepo.findOne({
-      where: { id },
-    });
-
+    const permission = await this.permissionRepo.findOne({ where: { id } });
     if (!permission) {
-      throw new NotFoundException('Permission không tồn tại');
+      throw new NotFoundException('Permission not found');
     }
-
     return permission;
   }
 
-  /**
-   * UPDATE permission (chỉ cho sửa description)
-   */
   async update(id: string, dto: UpdatePermissionDto): Promise<Permission> {
     const permission = await this.findOne(id);
 
     if (permission.isSystem) {
-      throw new ForbiddenException('Không thể chỉnh sửa permission hệ thống');
+      throw new ForbiddenException('Cannot modify a system permission');
     }
 
     permission.description = dto.description ?? permission.description;
-
     return this.permissionRepo.save(permission);
   }
 
-  /**
-   * DELETE permission
-   * ⚠️ Không cho xóa permission hệ thống
-   * ⚠️ Có thể đổi sang soft delete nếu muốn
-   */
   async remove(id: string): Promise<{ message: string }> {
     const permission = await this.findOne(id);
 
     if (permission.isSystem) {
-      throw new ForbiddenException('Không thể xóa permission hệ thống');
+      throw new ForbiddenException('Cannot delete a system permission');
     }
 
     await this.permissionRepo.remove(permission);
-
-    return {
-      message: 'Permission đã được xóa',
-    };
+    return { message: 'Permission deleted' };
   }
 
   async getMeta() {
@@ -108,11 +84,9 @@ export class PermissionsService {
     });
 
     const modules = Array.from(new Set(permissions.map((p) => p.module)));
-
     const systemActions = Array.from(
       new Set(permissions.filter((p) => p.isSystem).map((p) => p.action)),
     );
-
     const customActions = Array.from(
       new Set(permissions.filter((p) => !p.isSystem).map((p) => p.action)),
     );

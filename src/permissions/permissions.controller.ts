@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -17,6 +18,7 @@ import {
   ApiOkResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
+import { PaginationDto } from '@/common/dto/pagination.dto';
 import { CreatePermissionDto } from './dto/create-permission.dto';
 import { PermissionsService } from './permissions.service';
 import { Permission } from './entities/permission.entity';
@@ -31,65 +33,51 @@ export class PermissionsController {
   constructor(private readonly service: PermissionsService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Tạo permission mới' })
+  @ApiOperation({ summary: 'Create a new permission' })
   @ApiResponse({ status: 201, type: Permission })
   create(@Body() dto: CreatePermissionDto) {
     return this.service.create(dto);
   }
 
+  @Get('meta')
+  @ApiOperation({
+    summary: 'Get permission metadata for frontend',
+    description:
+      'Used to render UI (module, system action, custom action). Not for auth.',
+  })
+  @ApiOkResponse({ type: PermissionMetaResponseDto })
+  getMeta() {
+    return this.service.getMeta();
+  }
+
   @Get()
-  @ApiOperation({ summary: 'Danh sách permission' })
+  @ApiOperation({ summary: 'List permissions (paginated)' })
   @ApiResponse({ status: 200, type: [Permission] })
-  findAll() {
-    return this.service.findAll();
+  findAll(@Query() pagination: PaginationDto) {
+    return this.service.findAll(pagination);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Chi tiết permission' })
-  @ApiParam({
-    name: 'id',
-    example: 'uuid-v4',
-  })
+  @ApiOperation({ summary: 'Get permission by id' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiResponse({ status: 200, type: Permission })
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }
 
   @Put(':id')
-  @ApiOperation({ summary: 'Cập nhật permission' })
-  @ApiParam({
-    name: 'id',
-    example: 'uuid-v4',
-  })
+  @ApiOperation({ summary: 'Update permission' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiResponse({ status: 200, type: Permission })
   update(@Param('id') id: string, @Body() dto: UpdatePermissionDto) {
     return this.service.update(id, dto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Xóa permission' })
-  @ApiParam({
-    name: 'id',
-    example: 'uuid-v4',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Permission đã bị xóa',
-  })
+  @ApiOperation({ summary: 'Delete permission' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiResponse({ status: 200, description: 'Permission deleted' })
   remove(@Param('id') id: string) {
     return this.service.remove(id);
-  }
-
-  @Get('meta')
-  @ApiOperation({
-    summary: 'Lấy metadata permission cho frontend',
-    description:
-      'Dùng để render UI (module, system action, custom action). Không dùng cho auth.',
-  })
-  @ApiOkResponse({
-    type: PermissionMetaResponseDto,
-  })
-  getMeta() {
-    return this.service.getMeta();
   }
 }

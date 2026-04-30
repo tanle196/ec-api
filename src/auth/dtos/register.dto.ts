@@ -1,23 +1,16 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsEmail,
-  IsEnum,
-  IsString,
-  MaxLength,
-  MinLength,
-} from 'class-validator';
-import { AuthProvider } from '../enums/AuthProvider';
+import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @ApiProperty({
-    example: 'letutan500@gmail.com',
+    example: 'user@example.com',
     description: 'User email address',
   })
   @IsEmail()
   email: string;
 
   @ApiProperty({
-    example: '12345678',
+    example: 'P@ssw0rd!',
     description: 'User password',
     minLength: 8,
     maxLength: 50,
@@ -26,12 +19,4 @@ export class RegisterDto {
   @MinLength(8)
   @MaxLength(50)
   password: string;
-
-  @ApiProperty({
-    example: AuthProvider.LOCAL,
-    enum: AuthProvider,
-    description: 'Authentication provider',
-  })
-  @IsEnum(AuthProvider)
-  provider: AuthProvider;
 }

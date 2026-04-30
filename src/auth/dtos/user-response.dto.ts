@@ -19,5 +19,4 @@ export class UserResponseDto {
     required: false,
   })
   fullName!: string;
-
 }
