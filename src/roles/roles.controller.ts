@@ -1,0 +1,94 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiBody,
+  ApiOkResponse,
+  ApiParam,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
+import { RolesService } from './roles.service';
+import { CreateRoleDto } from './dto/create-role.dto';
+import { RoleResponseDto } from './dto/role-response.dto';
+import { AssignPermissionsDto } from './dto/assign-permissions.dto';
+import { UpdateRoleDto } from './dto/update-role.dto';
+
+@ApiTags('roles')
+@Controller('roles')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('access-token')
+export class RolesController {
+  constructor(private readonly rolesService: RolesService) {}
+
+  @Post()
+  @ApiOperation({ summary: 'Create or update a role with permissions' })
+  @ApiBody({ type: CreateRoleDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Role created or updated successfully',
+    type: RoleResponseDto,
+  })
+  async createRole(
+    @Body() createRoleDto: CreateRoleDto,
+  ): Promise<RoleResponseDto> {
+    return this.rolesService.create(createRoleDto);
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'Danh sách role' })
+  @ApiOkResponse({ type: [RoleResponseDto] })
+  findAll() {
+    return this.rolesService.findAll();
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Chi tiết role' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiOkResponse({ type: RoleResponseDto })
+  findOne(@Param('id') id: string) {
+    return this.rolesService.findOne(id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Cập nhật role' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiOkResponse({ type: RoleResponseDto })
+  update(@Param('id') id: string, @Body() dto: UpdateRoleDto) {
+    return this.rolesService.update(id, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Xoá role (không áp dụng cho ADMIN)' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiOkResponse({
+    schema: {
+      example: { success: true },
+    },
+  })
+  remove(@Param('id') id: string) {
+    return this.rolesService.remove(id);
+  }
+
+  @Put(':id/permissions')
+  @ApiOperation({ summary: 'Gán permission cho role' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiOkResponse({ type: RoleResponseDto })
+  assignPermissions(
+    @Param('id') id: string,
+    @Body() dto: AssignPermissionsDto,
+  ) {
+    return this.rolesService.assignPermissions(id, dto.permissionIds);
+  }
+}

@@ -1,43 +1,53 @@
-// users/entity/user.entity.ts
+import { Identity } from '@/auth/entities/identity.entity';
+import { Permission } from '@/permissions/entities/permission.entity';
+import { Role } from '@/roles/entities/role.entity';
 import {
-  Entity,
-  PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  Entity,
+  JoinTable,
+  ManyToMany,
+  OneToMany,
+  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 
-export type UserRole = 'customer' | 'admin' | 'staff';
-
 @Entity('users')
 export class User {
-  @PrimaryGeneratedColumn()
-  id!: number;
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
 
-  @Column({ length: 150 })
-  full_name!: string;
-
-  @Column({ unique: true, length: 255 })
+  @Column({ unique: true })
   email!: string;
 
-  @Column({ length: 255 })
-  password!: string;
+  @Column({ nullable: true })
+  fullName!: string;
 
-  @Column({ length: 20, nullable: true })
-  phone?: string;
+  @Column({ nullable: true })
+  avatar!: string;
 
-  @Column({ type: 'text', nullable: true })
-  address?: string;
+  @CreateDateColumn({ type: 'timestamp' })
+  createdAt!: Date;
 
-  @Column({ type: 'varchar', length: 20, default: 'customer' })
-  role!: 'customer' | 'admin' | 'staff';
+  @UpdateDateColumn({ type: 'timestamp' })
+  updatedAt!: Date;
 
-  @Column({ default: true })
-  is_active!: boolean;
+  @OneToMany(() => Identity, (identity) => identity.user)
+  identities!: Identity[];
 
-  @CreateDateColumn()
-  created_at!: Date;
+  @ManyToMany(() => Role, (role) => role.users)
+  @JoinTable({
+    name: 'user_role',
+    joinColumn: { name: 'user_id', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'role_id', referencedColumnName: 'id' },
+  })
+  roles!: Role[];
 
-  @UpdateDateColumn()
-  updated_at!: Date;
+  @ManyToMany(() => Permission, (permission) => permission.users)
+  @JoinTable({
+    name: 'user_permission',
+    joinColumn: { name: 'user_id', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'permission_id', referencedColumnName: 'id' },
+  })
+  permissions!: Permission[];
 }
