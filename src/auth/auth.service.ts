@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   Injectable,
-  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -31,8 +30,7 @@ export class AuthService {
   ) {}
 
   async hashedPassword(password: string): Promise<string> {
-    const passwordHash = await argon2.hash(password);
-    return passwordHash;
+    return argon2.hash(password);
   }
 
   async verifiedPassword(
@@ -40,8 +38,15 @@ export class AuthService {
     storedPassword?: string,
   ): Promise<boolean> {
     if (!storedPassword) return false;
-    const isMatched = await argon2.verify(storedPassword, plainPassword);
-    return isMatched;
+    return argon2.verify(storedPassword, plainPassword);
+  }
+
+  private generateToken(): string {
+    return crypto.randomBytes(32).toString('hex');
+  }
+
+  private hashToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
   }
 
   async generateTokens({
@@ -68,10 +73,7 @@ export class AuthService {
       expiresIn: jwtConfig.refreshExpiresIn,
     });
 
-    return {
-      accessToken,
-      refreshToken,
-    };
+    return { accessToken, refreshToken };
   }
 
   async validateLocalUser(
@@ -97,7 +99,7 @@ export class AuthService {
     }
 
     if (!identity.passwordHash) {
-      throw new UnauthorizedException('Missing password');
+      throw new UnauthorizedException('Invalid credentials');
     }
 
     const isMatched = await this.verifiedPassword(
@@ -170,75 +172,65 @@ export class AuthService {
     };
   }
 
-  generateToken = () => {
-    return crypto.randomBytes(32).toString('hex');
-  };
-
   async register({ email, password }: RegisterDto) {
     const token = this.generateToken();
+    const tokenHash = this.hashToken(token);
     const expires = new Date(Date.now() + 1000 * 60 * 60);
     const passwordHash = await this.hashedPassword(password);
 
-    let user: User | null;
+    const user = await this.dataSource.transaction(async (manager) => {
+      const userRepo = manager.getRepository(User);
+      const identityRepo = manager.getRepository(Identity);
 
-    try {
-      user = await this.dataSource.transaction(async (manager) => {
-        const userRepo = manager.getRepository(User);
-        const identityRepo = manager.getRepository(Identity);
+      const newUser = userRepo.create({ email });
+      await userRepo.save(newUser);
 
-        const newUser = userRepo.create({ email });
-        await userRepo.save(newUser);
-
-        const identity = identityRepo.create({
-          provider: AuthProvider.LOCAL,
-          providerUserId: email,
-          passwordHash,
-          user: newUser,
-          verificationToken: token,
-          verificationTokenExpires: expires,
-        });
-        await identityRepo.save(identity);
-
-        return newUser; // transaction return
+      const identity = identityRepo.create({
+        provider: AuthProvider.LOCAL,
+        providerUserId: email,
+        passwordHash,
+        user: newUser,
+        verificationToken: tokenHash,
+        verificationTokenExpires: expires,
       });
-    } catch (error) {
-      throw error;
-    }
+      await identityRepo.save(identity);
 
-    // gửi mail sau khi transaction commit
-    try {
-      const appDomain = this.configService.getAppConfig().appDomain;
-      const verifyUrl = `${appDomain}/auth/verify-email?token=${token}`;
-      void this.mailService.sendVerificationEmail(email, verifyUrl);
-    } catch (error) {
-      throw error;
-    }
+      return newUser;
+    });
+
+    const appDomain = this.configService.getAppConfig().appDomain;
+    const verifyUrl = `${appDomain}/auth/verify-email?token=${token}`;
+    void this.mailService.sendVerificationEmail(email, verifyUrl);
 
     return user;
   }
 
   async activeAccount(token: string): Promise<User> {
-    const identityRepo = this.identityRepository;
-    const identity = await identityRepo.findOne({
-      where: [{ verificationToken: token }],
+    const tokenHash = this.hashToken(token);
+    const identity = await this.identityRepository.findOne({
+      where: { verificationToken: tokenHash },
       relations: ['user'],
     });
 
     if (!identity) {
-      throw new BadRequestException('Token không hợp lệ');
+      throw new BadRequestException('Invalid token');
+    }
+
+    if (identity.isActive) {
+      throw new BadRequestException('Account is already active');
     }
 
     if (
       identity.verificationTokenExpires &&
       identity.verificationTokenExpires < new Date()
     ) {
-      throw new BadRequestException('Token đã hết hạn');
+      throw new BadRequestException('Token has expired');
     }
 
     identity.verificationToken = null;
     identity.verificationTokenExpires = null;
     identity.isActive = true;
-    await identityRepo.save(identity);
+    await this.identityRepository.save(identity);
 
     return identity.user;
   }
@@ -246,14 +238,15 @@ export class AuthService {
   async forgotPassword(email: string) {
     const user = await this.userService.findByEmail(email);
     if (!user) {
-      throw new NotFoundException();
+      return;
     }
 
     const token = this.generateToken();
-    const expires = new Date(Date.now() + 15 * 60 * 1000); // 15 phút
+    const tokenHash = this.hashToken(token);
+    const expires = new Date(Date.now() + 15 * 60 * 1000);
 
     const identity = user.identities?.find(
-      (identity) => identity.provider === AuthProvider.LOCAL,
+      (i) => i.provider === AuthProvider.LOCAL,
     );
 
     if (!identity) {
@@ -262,7 +255,7 @@ export class AuthService {
       );
     }
 
-    identity.resetToken = token;
+    identity.resetToken = tokenHash;
     identity.resetTokenExpires = expires;
     await this.identityRepository.save(identity);
 
@@ -272,15 +265,17 @@ export class AuthService {
   }
 
   async resetPassword(newPassword: string, token: string) {
+    const tokenHash = this.hashToken(token);
     const identity = await this.identityRepository.findOne({
-      where: [{ resetToken: token }],
+      where: { resetToken: tokenHash },
     });
+
     if (
       !identity ||
       !identity.resetTokenExpires ||
       identity.resetTokenExpires < new Date()
     ) {
-      throw new BadRequestException('Token không hợp lệ');
+      throw new BadRequestException('Invalid or expired token');
     }
 
     identity.passwordHash = await this.hashedPassword(newPassword);

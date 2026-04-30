@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -9,6 +10,7 @@ import { In, Repository } from 'typeorm';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { Role } from './entities/role.entity';
 import { UpdateRoleDto } from './dto/update-role.dto';
+import { PaginationDto } from '@/common/dto/pagination.dto';
 
 @Injectable()
 export class RolesService {
@@ -20,12 +22,11 @@ export class RolesService {
   ) {}
 
   async create(data: CreateRoleDto): Promise<Role> {
-    const role = await this.repo.findOne({
-      where: { name: data.name },
-      relations: ['permissions'],
-    });
+    const existing = await this.repo.findOne({ where: { name: data.name } });
+    if (existing) {
+      throw new ConflictException(`Role '${data.name}' already exists`);
+    }
 
-    // Load permissions from database if provided
     let permissions: Permission[] = [];
     if (data.permissions && data.permissions.length > 0) {
       permissions = await this.permissionRepo.find({
@@ -33,27 +34,6 @@ export class RolesService {
       });
     }
 
-    if (role) {
-      // Update existing role with new permissions
-      if (permissions.length > 0) {
-        const existingPermissionIds = new Set(
-          role.permissions.map((p) => p.id),
-        );
-        const newPermissions = permissions.filter(
-          (p) => !existingPermissionIds.has(p.id),
-        );
-        role.permissions = [...role.permissions, ...newPermissions];
-      }
-
-      // Update description if provided
-      if (data.description !== undefined) {
-        role.description = data.description;
-      }
-
-      return this.repo.save(role);
-    }
-
-    // Create new role
     const newRole = this.repo.create({
       name: data.name,
       description: data.description,
@@ -62,19 +42,25 @@ export class RolesService {
     return this.repo.save(newRole);
   }
 
-  async findAll() {
-    const roles = await this.repo.find({
+  async findAll(pagination: PaginationDto) {
+    const { page = 1, limit = 20 } = pagination;
+    const [roles, total] = await this.repo.findAndCount({
       relations: ['permissions'],
       order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
     });
 
-    return roles.map((r) => ({
-      id: r.id,
-      name: r.name,
-      description: r.description,
-      permissionsCount: r.permissions?.length ?? 0,
-      createdAt: r.createdAt,
-    }));
+    return {
+      data: roles.map((r) => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        permissionsCount: r.permissions?.length ?? 0,
+        createdAt: r.createdAt,
+      })),
+      total,
+    };
   }
 
   async findOne(id: string) {
@@ -83,7 +69,7 @@ export class RolesService {
       relations: ['permissions'],
     });
     if (!role) {
-      throw new NotFoundException('Role không tồn tại');
+      throw new NotFoundException('Role not found');
     }
     return role;
   }
@@ -92,10 +78,12 @@ export class RolesService {
     const role = await this.findOne(id);
 
     if (role.name === 'ADMIN') {
-      throw new ForbiddenException('Không thể sửa role ADMIN');
+      throw new ForbiddenException('Cannot modify the ADMIN role');
     }
 
-    Object.assign(role, dto);
+    if (dto.name !== undefined) role.name = dto.name;
+    if (dto.description !== undefined) role.description = dto.description;
+
     return this.repo.save(role);
   }
 
@@ -103,7 +91,7 @@ export class RolesService {
     const role = await this.findOne(id);
 
     if (role.name === 'ADMIN') {
-      throw new ForbiddenException('Không thể xoá role ADMIN');
+      throw new ForbiddenException('Cannot delete the ADMIN role');
     }
 
     await this.repo.remove(role);
@@ -112,11 +100,9 @@ export class RolesService {
 
   async assignPermissions(roleId: string, permissionIds: string[]) {
     const role = await this.findOne(roleId);
-
     const permissions = await this.permissionRepo.findBy({
       id: In(permissionIds),
     });
-
     role.permissions = permissions;
     return this.repo.save(role);
   }

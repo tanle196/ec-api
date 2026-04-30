@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Post,
+  Req,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
@@ -13,6 +14,8 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { AuthGuard } from '@nestjs/passport';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import type { CurrentUser as ICurrentUser } from '@/common/interfaces/current-user.interface';
 import { AuthService } from './auth.service';
@@ -34,6 +37,7 @@ export class AuthController {
 
   @Post('login')
   @UseGuards(LocalAuthGuard)
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @ApiOperation({ summary: 'User login' })
   @ApiBody({ type: LoginDto })
   @ApiResponse({
@@ -42,15 +46,11 @@ export class AuthController {
     type: TokenResponseDto,
   })
   async login(@CurrentUser() user: ICurrentUser): Promise<TokenResponseDto> {
-    const userId = user.id;
-    if (!userId) {
-      throw new Error('User ID is required');
-    }
-    const token = await this.authService.generateTokens({ id: userId });
-    return token;
+    return this.authService.generateTokens({ id: user.id! });
   }
 
   @Post('register')
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @ApiOperation({ summary: 'User registration' })
   @ApiBody({ type: RegisterDto })
   @ApiResponse({
@@ -87,11 +87,11 @@ export class AuthController {
     if (!user.id) {
       throw new UnauthorizedException();
     }
-
     return this.authService.generateTokens({ id: user.id });
   }
 
   @Post('forgot-password')
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @ApiOperation({ summary: 'Request password reset' })
   @ApiBody({ type: ForgotPasswordDto })
   @ApiResponse({
@@ -103,7 +103,9 @@ export class AuthController {
     @Body() forgotPasswordDto: ForgotPasswordDto,
   ): Promise<MessageResponseDto> {
     await this.authService.forgotPassword(forgotPasswordDto.email);
-    return { message: 'Nếu email tồn tại, link reset password đã gửi' };
+    return {
+      message: 'If the email exists, a password reset link has been sent',
+    };
   }
 
   @Post('reset-password')
@@ -121,6 +123,27 @@ export class AuthController {
       resetPasswordDto.newPassword,
       resetPasswordDto.token,
     );
-    return { message: 'Check mail đổi mật khẩu thành công' };
+    return { message: 'Password has been reset successfully' };
+  }
+
+  @Get('google')
+  @UseGuards(AuthGuard('google'))
+  @ApiOperation({ summary: 'Google OAuth login' })
+  googleLogin() {
+    // Passport redirects to Google
+  }
+
+  @Get('google/callback')
+  @UseGuards(AuthGuard('google'))
+  @ApiOperation({ summary: 'Google OAuth callback' })
+  @ApiResponse({
+    status: 200,
+    description: 'Google login successful',
+    type: TokenResponseDto,
+  })
+  async googleCallback(
+    @Req() req: { user: ICurrentUser },
+  ): Promise<TokenResponseDto> {
+    return this.authService.generateTokens({ id: req.user.id! });
   }
 }
