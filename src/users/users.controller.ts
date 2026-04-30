@@ -1,42 +1,41 @@
-import { Controller, Get, Post, Body, Param, Put, Delete } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, UseGuards } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
+import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Roles } from '@/roles/decorators/roles.decorator';
+import { RolesGuard } from '@/roles/guards/roles.guard';
+import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import type { CurrentUser as ICurrentUser } from '@/common/interfaces/current-user.interface';
+import { UserProfileDto } from './dto/user-profile.dto';
 
-@ApiTags('users')
-@ApiBearerAuth()
 @Controller('users')
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Post()
-  @ApiOperation({ summary: 'Create user' })
-  create(@Body() dto: CreateUserDto) {
-    return this.usersService.create(dto);
-  }
-
   @Get()
-  @ApiOperation({ summary: 'List all users' })
-  findAll() {
+  @UseGuards(JwtAuthGuard)
+  @Roles('ADMIN')
+  @ApiBearerAuth('access-token')
+  async findAll() {
     return this.usersService.findAll();
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Get user by id' })
-  findOne(@Param('id') id: string) {
-    return this.usersService.findOne(+id);
-  }
-
-  @Put(':id')
-  @ApiOperation({ summary: 'Update user' })
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.usersService.update(+id, dto);
-  }
-
-  @Delete(':id')
-  @ApiOperation({ summary: 'Delete user' })
-  remove(@Param('id') id: string) {
-    return this.usersService.remove(+id);
+  @Get('profile')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Create or update a role with permissions' })
+  @ApiResponse({
+    status: 201,
+    description: 'Role created or updated successfully',
+    type: UserProfileDto,
+  })
+  @UseGuards(JwtAuthGuard)
+  async getProfile(@CurrentUser() user: ICurrentUser) {
+    if (!user.id) {
+      return null;
+    }
+    const profile = await this.usersService.getUserProfile(user.id);
+    if (!profile) return null;
+    return profile;
   }
 }
