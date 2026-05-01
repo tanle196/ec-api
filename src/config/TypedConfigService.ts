@@ -56,7 +56,7 @@ export class TypedConfigService {
     return this.getEnv() === NodeEnv.Local;
   }
 
-  isTest(): boolean {
+  isStaging(): boolean {
     return this.getEnv() === NodeEnv.Staging;
   }
 

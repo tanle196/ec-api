@@ -5,6 +5,7 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { QueryFailedError } from 'typeorm';
+import { PostgresErrorCode } from './postgres-error-codes';
 
 interface PostgresError extends QueryFailedError {
   code: string;
@@ -17,13 +18,13 @@ export class ErrorMapper {
       const dbError = error as PostgresError;
 
       switch (dbError.code) {
-        case '23505':
+        case PostgresErrorCode.UniqueViolation:
           return new ConflictException('Duplicate entry');
-        case '23503':
+        case PostgresErrorCode.ForeignKeyViolation:
           return new BadRequestException('Invalid reference');
-        case '23502':
+        case PostgresErrorCode.NotNullViolation:
           return new BadRequestException('Missing required field');
-        case '42501':
+        case PostgresErrorCode.CheckViolation:
           return new ForbiddenException('Permission denied');
         default:
           return new InternalServerErrorException('Database error');

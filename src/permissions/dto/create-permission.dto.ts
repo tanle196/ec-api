@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { PermissionAction } from '../enums/permission-action.enum';
 
 export class CreatePermissionDto {
@@ -7,13 +7,16 @@ export class CreatePermissionDto {
     example: 'user',
     description: 'Module',
   })
-  module: string;
+  @IsString()
+  @IsNotEmpty()
+  module!: string;
 
   @ApiProperty({
     enum: PermissionAction,
     example: PermissionAction.READ,
   })
-  action: PermissionAction;
+  @IsEnum(PermissionAction)
+  action!: PermissionAction;
 
   @ApiProperty({
     example: 'Xem danh sách người dùng',
@@ -29,5 +32,6 @@ export class CreatePermissionDto {
     description: 'Đánh dấu permission hệ thống',
   })
   @IsOptional()
+  @IsBoolean()
   isSystem?: boolean;
 }

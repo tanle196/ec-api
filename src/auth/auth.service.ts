@@ -68,12 +68,41 @@ export class AuthService {
       expiresIn: jwtConfig.accessExpiresIn,
     });
 
-    const refreshToken = await this.jwtService.signAsync(payload, {
-      secret: jwtConfig.refreshSecret,
-      expiresIn: jwtConfig.refreshExpiresIn,
-    });
+    const rawRefreshToken = this.generateToken();
+    const refreshToken = await this.jwtService.signAsync(
+      { ...payload, jti: rawRefreshToken },
+      {
+        secret: jwtConfig.refreshSecret,
+        expiresIn: jwtConfig.refreshExpiresIn,
+      },
+    );
+
+    const refreshTokenHash = this.hashToken(rawRefreshToken);
+    await this.identityRepository.update(
+      { user: { id }, provider: AuthProvider.LOCAL },
+      { refreshToken: refreshTokenHash },
+    );
 
     return { accessToken, refreshToken };
+  }
+
+  async rotateRefreshToken(
+    userId: string,
+    rawJti: string,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    const jtiHash = this.hashToken(rawJti);
+    const identity = await this.identityRepository.findOne({
+      where: { user: { id: userId }, provider: AuthProvider.LOCAL },
+    });
+
+    if (!identity || identity.refreshToken !== jtiHash) {
+      throw new UnauthorizedException('Refresh token is invalid or already used');
+    }
+
+    identity.refreshToken = null;
+    await this.identityRepository.save(identity);
+
+    return this.generateTokens({ id: userId });
   }
 
   async validateLocalUser(
@@ -88,6 +117,7 @@ export class AuthService {
       .select([
         'identity.id',
         'identity.passwordHash',
+        'identity.isActive',
         'user.id',
         'user.email',
         'user.fullName',
@@ -96,6 +126,10 @@ export class AuthService {
 
     if (!identity || !identity.user) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (!identity.isActive) {
+      throw new UnauthorizedException('Account is not activated');
     }
 
     if (!identity.passwordHash) {
@@ -127,10 +161,13 @@ export class AuthService {
       .leftJoinAndSelect('identity.user', 'user')
       .where('identity.provider = :provider', { provider })
       .andWhere('identity.providerUserId = :providerUserId', { providerUserId })
-      .select(['identity.id', 'user.id', 'user.email', 'user.fullName'])
+      .select(['identity.id', 'identity.isActive', 'user.id', 'user.email', 'user.fullName'])
       .getOne();
 
     if (identity) {
+      if (!identity.isActive) {
+        throw new UnauthorizedException('Account is not activated');
+      }
       return {
         id: identity.user.id,
         email: identity.user.email,
@@ -158,6 +195,7 @@ export class AuthService {
       const newIdentity = manager.getRepository(Identity).create({
         provider,
         providerUserId,
+        isActive: true,
         user: newUser,
       });
       await manager.getRepository(Identity).save(newIdentity);
@@ -172,7 +210,7 @@ export class AuthService {
     };
   }
 
-  async register({ email, password }: RegisterDto) {
+  async register({ email, password }: RegisterDto): Promise<UserResponseDto> {
     const token = this.generateToken();
     const tokenHash = this.hashToken(token);
     const expires = new Date(Date.now() + 1000 * 60 * 60);
@@ -202,10 +240,14 @@ export class AuthService {
     const verifyUrl = `${appDomain}/auth/verify-email?token=${token}`;
     void this.mailService.sendVerificationEmail(email, verifyUrl);
 
-    return user;
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+    };
   }
 
-  async activeAccount(token: string): Promise<User> {
+  async activeAccount(token: string): Promise<UserResponseDto> {
     const tokenHash = this.hashToken(token);
     const identity = await this.identityRepository.findOne({
       where: { verificationToken: tokenHash },
@@ -232,7 +274,11 @@ export class AuthService {
     identity.isActive = true;
     await this.identityRepository.save(identity);
 
-    return identity.user;
+    return {
+      id: identity.user.id,
+      email: identity.user.email,
+      fullName: identity.user.fullName,
+    };
   }
 
   async forgotPassword(email: string) {
@@ -276,6 +322,10 @@ export class AuthService {
       identity.resetTokenExpires < new Date()
     ) {
       throw new BadRequestException('Invalid or expired token');
+    }
+
+    if (!identity.isActive) {
+      throw new BadRequestException('Account is not activated');
     }
 
     identity.passwordHash = await this.hashedPassword(newPassword);
