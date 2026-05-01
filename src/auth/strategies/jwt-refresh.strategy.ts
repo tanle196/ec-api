@@ -28,8 +28,9 @@ export class JwtRefreshStrategy extends PassportStrategy(
     email: string;
     roles: string[];
     permissions: string[];
+    jti: string;
   }): CurrentUser {
-    if (!payload.sub) {
+    if (!payload.sub || !payload.jti) {
       throw new UnauthorizedException();
     }
     return {
@@ -37,6 +38,7 @@ export class JwtRefreshStrategy extends PassportStrategy(
       email: payload.email,
       roles: payload.roles ?? [],
       permissions: payload.permissions ?? [],
+      refreshJti: payload.jti,
     };
   }
 }

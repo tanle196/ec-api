@@ -5,4 +5,5 @@ export interface CurrentUser {
   avatar?: string;
   roles: string[];
   permissions: string[];
+  refreshJti?: string;
 }

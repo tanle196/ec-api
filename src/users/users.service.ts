@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
+import { PaginationDto } from '@/common/dto/pagination.dto';
 
 type SafeUserUpdate = Pick<User, 'fullName' | 'avatar'>;
 
@@ -69,9 +70,14 @@ export class UsersService {
     };
   }
 
-  findAll(): Promise<User[]> {
-    return this.repo.find({
+  async findAll(pagination: PaginationDto): Promise<{ data: User[]; total: number }> {
+    const { page = 1, limit = 20 } = pagination;
+    const [data, total] = await this.repo.findAndCount({
       select: ['id', 'email', 'fullName', 'avatar', 'createdAt'],
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
     });
+    return { data, total };
   }
 }

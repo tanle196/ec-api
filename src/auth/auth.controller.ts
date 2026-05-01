@@ -84,10 +84,10 @@ export class AuthController {
     type: TokenResponseDto,
   })
   async refresh(@CurrentUser() user: ICurrentUser): Promise<TokenResponseDto> {
-    if (!user.id) {
+    if (!user.id || !user.refreshJti) {
       throw new UnauthorizedException();
     }
-    return this.authService.generateTokens({ id: user.id });
+    return this.authService.rotateRefreshToken(user.id, user.refreshJti);
   }
 
   @Post('forgot-password')
