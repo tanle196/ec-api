@@ -13,6 +13,7 @@
     "start:debug": "NODE_ENV=local nest start --debug --watch",
     "start:prod": "NODE_ENV=production node dist/main",
     "start:stg": "NODE_ENV=staging node dist/main",
+    "generate:swagger": "ts-node src/generate-swagger.ts",
     "db:local": "docker compose -f docker-compose.local.yml up -d && npm run start:dev",
     "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js",
     "migration:run": "ts-node -r tsconfig-paths/register node_modules/.bin/typeorm migration:run -d src/database/data-source.ts",

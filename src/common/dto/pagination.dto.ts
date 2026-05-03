@@ -18,3 +18,17 @@ export class PaginationDto {
   @Max(100)
   limit?: number = 20;
 }
+
+export class PaginatedResponseDto<T> {
+  @ApiProperty({ isArray: true })
+  data!: T[];
+
+  @ApiProperty()
+  total!: number;
+
+  @ApiProperty()
+  page!: number;
+
+  @ApiProperty()
+  limit!: number;
+}
