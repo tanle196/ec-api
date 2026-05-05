@@ -30,9 +30,7 @@ const ROLES: RoleSeedData[] = [
   {
     name: 'member',
     description: 'Thành viên thông thường',
-    permissionKeys: [
-      { module: 'user', action: 'read' },
-    ],
+    permissionKeys: [{ module: 'user', action: 'read' }],
   },
 ];
 
@@ -55,6 +53,7 @@ export async function seedRoles(
         ? allPermissions
         : allPermissions.filter((p) =>
             data.permissionKeys.some(
+              // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
               (k) => k.module === p.module && k.action === p.action,
             ),
           );
@@ -66,7 +65,9 @@ export async function seedRoles(
         permissions: assignedPermissions,
       });
       await roleRepo.save(role);
-      console.log(`  [+] Role: ${data.name} (${assignedPermissions.length} permissions)`);
+      console.log(
+        `  [+] Role: ${data.name} (${assignedPermissions.length} permissions)`,
+      );
     } else {
       role.description = data.description;
       role.permissions = assignedPermissions;

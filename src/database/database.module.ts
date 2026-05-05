@@ -8,7 +8,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
       inject: [TypedConfigService],
       useFactory: (typedConfigService: TypedConfigService) => {
         const dbConfig = typedConfigService.getDatabaseConfig();
-        const isLocal = typedConfigService.isLocal();
         const isProduction = typedConfigService.isProduction();
 
         return {
@@ -19,7 +18,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
           password: dbConfig.pass,
           database: dbConfig.name,
           autoLoadEntities: true,
-          synchronize: isLocal,
+          synchronize: false,
           logging: isProduction,
         };
       },

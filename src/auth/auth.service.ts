@@ -96,7 +96,9 @@ export class AuthService {
     });
 
     if (!identity || identity.refreshToken !== jtiHash) {
-      throw new UnauthorizedException('Refresh token is invalid or already used');
+      throw new UnauthorizedException(
+        'Refresh token is invalid or already used',
+      );
     }
 
     identity.refreshToken = null;
@@ -161,7 +163,13 @@ export class AuthService {
       .leftJoinAndSelect('identity.user', 'user')
       .where('identity.provider = :provider', { provider })
       .andWhere('identity.providerUserId = :providerUserId', { providerUserId })
-      .select(['identity.id', 'identity.isActive', 'user.id', 'user.email', 'user.fullName'])
+      .select([
+        'identity.id',
+        'identity.isActive',
+        'user.id',
+        'user.email',
+        'user.fullName',
+      ])
       .getOne();
 
     if (identity) {

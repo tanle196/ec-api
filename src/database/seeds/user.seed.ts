@@ -50,7 +50,9 @@ export async function seedUsers(
 
     const role = roles.find((r) => r.name === data.roleName);
     if (!role) {
-      console.warn(`  [!] Role "${data.roleName}" not found, skipping user ${data.email}`);
+      console.warn(
+        `  [!] Role "${data.roleName}" not found, skipping user ${data.email}`,
+      );
       continue;
     }
 
@@ -65,6 +67,7 @@ export async function seedUsers(
       const passwordHash = await argon2.hash(data.password);
       const identity = identityRepo.create({
         provider: AuthProvider.LOCAL,
+        providerUserId: data.email,
         passwordHash,
         isActive: true,
         user,

@@ -13,6 +13,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     };
     const tokenExtractor = ExtractJwtTyped.fromAuthHeaderAsBearerToken();
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
     super({
       jwtFromRequest: tokenExtractor,
       ignoreExpiration: false,

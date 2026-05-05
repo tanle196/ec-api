@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 // Thêm dòng này ở đầu file, TRƯỚC tất cả imports khác
 import 'tsconfig-paths/register';
 
@@ -56,12 +55,11 @@ async function generateSwagger() {
 
     await app.close();
     process.exit(0);
-  } catch (error) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  } catch (error: unknown) {
     console.error('\n❌ ERROR DETAILS:');
-    console.error('Message:', error.message);
-    console.error('Stack:', error.stack);
     process.exit(1);
   }
 }
 
-generateSwagger();
+void generateSwagger();
