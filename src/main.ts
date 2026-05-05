@@ -8,6 +8,26 @@ async function bootstrap() {
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
+  const whitelist = (process.env.APP_DOMAIN ?? 'http://localhost:5173')
+    .split(',')
+    .map((url) => url.trim());
+
+  app.enableCors({
+    origin: (origin: string, callback) => {
+      // cho phép request không có origin (mobile app, postman, curl)
+      if (!origin || whitelist.includes(origin)) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        callback(null, true);
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        callback(new Error(`CORS blocked: ${origin}`));
+      }
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+  });
+
   const config = new DocumentBuilder()
     .setTitle('EC API')
     .setDescription('E-Commerce REST API')

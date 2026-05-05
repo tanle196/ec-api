@@ -6,30 +6,24 @@ export class InitialSchema1746057600000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Enums
     await queryRunner.query(`
-      DO $$ BEGIN
-        CREATE TYPE "public"."auth_provider_enum" AS ENUM ('local', 'google', 'facebook');
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$
+      CREATE TYPE "public"."auth_provider_enum" AS ENUM ('local', 'google', 'facebook')
     `);
 
     await queryRunner.query(`
-      DO $$ BEGIN
-        CREATE TYPE "public"."permission_action_enum" AS ENUM (
-          'create', 'read', 'update', 'delete', 'cancel', 'publish', 'assign.role'
-        );
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$
+      CREATE TYPE "public"."permission_action_enum" AS ENUM (
+        'create', 'read', 'update', 'delete', 'cancel', 'publish', 'assign.role'
+      )
     `);
 
     // users
     await queryRunner.query(`
-      CREATE TABLE IF NOT EXISTS "users" (
-        "id"         UUID              NOT NULL DEFAULT uuid_generate_v4(),
-        "email"      CHARACTER VARYING NOT NULL,
-        "fullName"   CHARACTER VARYING,
-        "avatar"     CHARACTER VARYING,
-        "createdAt"  TIMESTAMP         NOT NULL DEFAULT now(),
-        "updatedAt"  TIMESTAMP         NOT NULL DEFAULT now(),
+      CREATE TABLE "users" (
+        "id"        UUID              NOT NULL DEFAULT uuid_generate_v4(),
+        "email"     CHARACTER VARYING NOT NULL,
+        "fullName"  CHARACTER VARYING,
+        "avatar"    CHARACTER VARYING,
+        "createdAt" TIMESTAMP         NOT NULL DEFAULT now(),
+        "updatedAt" TIMESTAMP         NOT NULL DEFAULT now(),
         CONSTRAINT "UQ_users_email" UNIQUE ("email"),
         CONSTRAINT "PK_users"       PRIMARY KEY ("id")
       )
@@ -37,7 +31,7 @@ export class InitialSchema1746057600000 implements MigrationInterface {
 
     // identities
     await queryRunner.query(`
-      CREATE TABLE IF NOT EXISTS "identities" (
+      CREATE TABLE "identities" (
         "id"                       UUID                           NOT NULL DEFAULT uuid_generate_v4(),
         "providerUserId"           CHARACTER VARYING,
         "provider"                 "public"."auth_provider_enum"  NOT NULL,
@@ -60,18 +54,15 @@ export class InitialSchema1746057600000 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      DO $$ BEGIN
-        ALTER TABLE "identities"
-          ADD CONSTRAINT "FK_identities_userId"
-          FOREIGN KEY ("userId") REFERENCES "users"("id")
-          ON DELETE CASCADE ON UPDATE NO ACTION;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$
+      ALTER TABLE "identities"
+        ADD CONSTRAINT "FK_identities_userId"
+        FOREIGN KEY ("userId") REFERENCES "users"("id")
+        ON DELETE CASCADE ON UPDATE NO ACTION
     `);
 
     // roles
     await queryRunner.query(`
-      CREATE TABLE IF NOT EXISTS "roles" (
+      CREATE TABLE "roles" (
         "id"          UUID              NOT NULL DEFAULT uuid_generate_v4(),
         "name"        CHARACTER VARYING NOT NULL,
         "description" CHARACTER VARYING,
@@ -84,7 +75,7 @@ export class InitialSchema1746057600000 implements MigrationInterface {
 
     // permissions
     await queryRunner.query(`
-      CREATE TABLE IF NOT EXISTS "permissions" (
+      CREATE TABLE "permissions" (
         "id"          UUID                              NOT NULL DEFAULT uuid_generate_v4(),
         "module"      CHARACTER VARYING(50)             NOT NULL,
         "action"      "public"."permission_action_enum" NOT NULL,
@@ -97,134 +88,146 @@ export class InitialSchema1746057600000 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS "IDX_permissions_module_action" ON "permissions" ("module", "action")
+      CREATE UNIQUE INDEX "IDX_permissions_module_action" ON "permissions" ("module", "action")
     `);
 
     // junction: user_role
     await queryRunner.query(`
-      CREATE TABLE IF NOT EXISTS "user_role" (
+      CREATE TABLE "user_role" (
         "user_id" UUID NOT NULL,
         "role_id" UUID NOT NULL,
         CONSTRAINT "PK_user_role" PRIMARY KEY ("user_id", "role_id")
       )
     `);
 
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_user_role_user_id" ON "user_role" ("user_id")`);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_user_role_role_id" ON "user_role" ("role_id")`);
+    await queryRunner.query(
+      `CREATE INDEX "IDX_user_role_user_id" ON "user_role" ("user_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_user_role_role_id" ON "user_role" ("role_id")`,
+    );
 
     await queryRunner.query(`
-      DO $$ BEGIN
-        ALTER TABLE "user_role"
-          ADD CONSTRAINT "FK_user_role_user_id"
-          FOREIGN KEY ("user_id") REFERENCES "users"("id")
-          ON DELETE CASCADE ON UPDATE CASCADE;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$
+      ALTER TABLE "user_role"
+        ADD CONSTRAINT "FK_user_role_user_id"
+        FOREIGN KEY ("user_id") REFERENCES "users"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE
     `);
 
     await queryRunner.query(`
-      DO $$ BEGIN
-        ALTER TABLE "user_role"
-          ADD CONSTRAINT "FK_user_role_role_id"
-          FOREIGN KEY ("role_id") REFERENCES "roles"("id")
-          ON DELETE CASCADE ON UPDATE CASCADE;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$
+      ALTER TABLE "user_role"
+        ADD CONSTRAINT "FK_user_role_role_id"
+        FOREIGN KEY ("role_id") REFERENCES "roles"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE
     `);
 
     // junction: user_permission
     await queryRunner.query(`
-      CREATE TABLE IF NOT EXISTS "user_permission" (
+      CREATE TABLE "user_permission" (
         "user_id"       UUID NOT NULL,
         "permission_id" UUID NOT NULL,
         CONSTRAINT "PK_user_permission" PRIMARY KEY ("user_id", "permission_id")
       )
     `);
 
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_user_permission_user_id" ON "user_permission" ("user_id")`);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_user_permission_permission_id" ON "user_permission" ("permission_id")`);
+    await queryRunner.query(
+      `CREATE INDEX "IDX_user_permission_user_id" ON "user_permission" ("user_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_user_permission_permission_id" ON "user_permission" ("permission_id")`,
+    );
 
     await queryRunner.query(`
-      DO $$ BEGIN
-        ALTER TABLE "user_permission"
-          ADD CONSTRAINT "FK_user_permission_user_id"
-          FOREIGN KEY ("user_id") REFERENCES "users"("id")
-          ON DELETE CASCADE ON UPDATE CASCADE;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$
+      ALTER TABLE "user_permission"
+        ADD CONSTRAINT "FK_user_permission_user_id"
+        FOREIGN KEY ("user_id") REFERENCES "users"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE
     `);
 
     await queryRunner.query(`
-      DO $$ BEGIN
-        ALTER TABLE "user_permission"
-          ADD CONSTRAINT "FK_user_permission_permission_id"
-          FOREIGN KEY ("permission_id") REFERENCES "permissions"("id")
-          ON DELETE CASCADE ON UPDATE CASCADE;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$
+      ALTER TABLE "user_permission"
+        ADD CONSTRAINT "FK_user_permission_permission_id"
+        FOREIGN KEY ("permission_id") REFERENCES "permissions"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE
     `);
 
     // junction: role_permission
     await queryRunner.query(`
-      CREATE TABLE IF NOT EXISTS "role_permission" (
+      CREATE TABLE "role_permission" (
         "role_id"       UUID NOT NULL,
         "permission_id" UUID NOT NULL,
         CONSTRAINT "PK_role_permission" PRIMARY KEY ("role_id", "permission_id")
       )
     `);
 
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_role_permission_role_id" ON "role_permission" ("role_id")`);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_role_permission_permission_id" ON "role_permission" ("permission_id")`);
+    await queryRunner.query(
+      `CREATE INDEX "IDX_role_permission_role_id" ON "role_permission" ("role_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_role_permission_permission_id" ON "role_permission" ("permission_id")`,
+    );
 
     await queryRunner.query(`
-      DO $$ BEGIN
-        ALTER TABLE "role_permission"
-          ADD CONSTRAINT "FK_role_permission_role_id"
-          FOREIGN KEY ("role_id") REFERENCES "roles"("id")
-          ON DELETE CASCADE ON UPDATE CASCADE;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$
+      ALTER TABLE "role_permission"
+        ADD CONSTRAINT "FK_role_permission_role_id"
+        FOREIGN KEY ("role_id") REFERENCES "roles"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE
     `);
 
     await queryRunner.query(`
-      DO $$ BEGIN
-        ALTER TABLE "role_permission"
-          ADD CONSTRAINT "FK_role_permission_permission_id"
-          FOREIGN KEY ("permission_id") REFERENCES "permissions"("id")
-          ON DELETE CASCADE ON UPDATE CASCADE;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$
+      ALTER TABLE "role_permission"
+        ADD CONSTRAINT "FK_role_permission_permission_id"
+        FOREIGN KEY ("permission_id") REFERENCES "permissions"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE
     `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "role_permission" DROP CONSTRAINT IF EXISTS "FK_role_permission_permission_id"`);
-    await queryRunner.query(`ALTER TABLE "role_permission" DROP CONSTRAINT IF EXISTS "FK_role_permission_role_id"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_role_permission_permission_id"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_role_permission_role_id"`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "role_permission"`);
+    // 1. Junction tables trước
+    await queryRunner.query(
+      `ALTER TABLE "role_permission" DROP CONSTRAINT "FK_role_permission_permission_id"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "role_permission" DROP CONSTRAINT "FK_role_permission_role_id"`,
+    );
+    await queryRunner.query(`DROP INDEX "IDX_role_permission_permission_id"`);
+    await queryRunner.query(`DROP INDEX "IDX_role_permission_role_id"`);
+    await queryRunner.query(`DROP TABLE "role_permission"`);
 
-    await queryRunner.query(`ALTER TABLE "user_permission" DROP CONSTRAINT IF EXISTS "FK_user_permission_permission_id"`);
-    await queryRunner.query(`ALTER TABLE "user_permission" DROP CONSTRAINT IF EXISTS "FK_user_permission_user_id"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_user_permission_permission_id"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_user_permission_user_id"`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "user_permission"`);
+    await queryRunner.query(
+      `ALTER TABLE "user_permission" DROP CONSTRAINT "FK_user_permission_permission_id"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "user_permission" DROP CONSTRAINT "FK_user_permission_user_id"`,
+    );
+    await queryRunner.query(`DROP INDEX "IDX_user_permission_permission_id"`);
+    await queryRunner.query(`DROP INDEX "IDX_user_permission_user_id"`);
+    await queryRunner.query(`DROP TABLE "user_permission"`);
 
-    await queryRunner.query(`ALTER TABLE "user_role" DROP CONSTRAINT IF EXISTS "FK_user_role_role_id"`);
-    await queryRunner.query(`ALTER TABLE "user_role" DROP CONSTRAINT IF EXISTS "FK_user_role_user_id"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_user_role_role_id"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_user_role_user_id"`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "user_role"`);
+    await queryRunner.query(
+      `ALTER TABLE "user_role" DROP CONSTRAINT "FK_user_role_role_id"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "user_role" DROP CONSTRAINT "FK_user_role_user_id"`,
+    );
+    await queryRunner.query(`DROP INDEX "IDX_user_role_role_id"`);
+    await queryRunner.query(`DROP INDEX "IDX_user_role_user_id"`);
+    await queryRunner.query(`DROP TABLE "user_role"`);
 
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_permissions_module_action"`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "permissions"`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "roles"`);
+    // 2. identities trước users (FK dependency)
+    await queryRunner.query(
+      `ALTER TABLE "identities" DROP CONSTRAINT "FK_identities_userId"`,
+    );
+    await queryRunner.query(`DROP TABLE "identities"`);
 
-    await queryRunner.query(`ALTER TABLE "identities" DROP CONSTRAINT IF EXISTS "FK_identities_userId"`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "identities"`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "users"`);
+    // 3. permissions, roles, users
+    await queryRunner.query(`DROP INDEX "IDX_permissions_module_action"`);
+    await queryRunner.query(`DROP TABLE "permissions"`);
+    await queryRunner.query(`DROP TABLE "roles"`);
+    await queryRunner.query(`DROP TABLE "users"`);
 
-    await queryRunner.query(`DROP TYPE IF EXISTS "public"."permission_action_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "public"."auth_provider_enum"`);
+    // 4. Enums cuối cùng
+    await queryRunner.query(`DROP TYPE "public"."permission_action_enum"`);
+    await queryRunner.query(`DROP TYPE "public"."auth_provider_enum"`);
   }
 }
