@@ -26,7 +26,7 @@ import { MessageResponseDto } from './dtos/message-response.dto';
 import { RegisterDto } from './dtos/register.dto';
 import { ResetPasswordDto } from './dtos/reset-password.dto';
 import { TokenResponseDto } from './dtos/token-response.dto';
-import { UserResponseDto } from './dtos/user-response.dto';
+import { UserInformationResponseDto } from './dtos/user-response.dto';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { JwtRefreshGuard } from './guards/jwt-auth-refresh.guard';
 
@@ -56,9 +56,9 @@ export class AuthController {
   @ApiResponse({
     status: 201,
     description: 'User registered successfully',
-    type: UserResponseDto,
+    type: UserInformationResponseDto,
   })
-  async register(@Body() registerDto: RegisterDto): Promise<UserResponseDto> {
+  async register(@Body() registerDto: RegisterDto): Promise<UserInformationResponseDto> {
     return this.authService.register(registerDto);
   }
 
@@ -68,9 +68,9 @@ export class AuthController {
   @ApiResponse({
     status: 200,
     description: 'Account activated successfully',
-    type: UserResponseDto,
+    type: UserInformationResponseDto,
   })
-  async active(@Body() activeDto: ActiveDto): Promise<UserResponseDto> {
+  async active(@Body() activeDto: ActiveDto): Promise<UserInformationResponseDto> {
     return this.authService.activeAccount(activeDto.token);
   }
 

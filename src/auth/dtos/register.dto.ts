@@ -7,7 +7,7 @@ export class RegisterDto {
     description: 'User email address',
   })
   @IsEmail()
-  email: string;
+  email!: string;
 
   @ApiProperty({
     example: 'P@ssw0rd!',
@@ -18,5 +18,5 @@ export class RegisterDto {
   @IsString()
   @MinLength(8)
   @MaxLength(50)
-  password: string;
+  password!: string;
 }

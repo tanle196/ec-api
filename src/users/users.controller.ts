@@ -13,7 +13,6 @@ import {
 import {
   ApiBearerAuth,
   ApiExtraModels,
-  ApiOkResponse,
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -31,10 +30,10 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  @Roles('admin')
+  @Roles('super-admin')
   @ApiOperation({ summary: 'List all users (admin only)' })
   @ApiExtraModels(UserListQueryDto)
-  @ApiOkResponse({ type: UserPaginatedResponseDto })
+  @ApiResponse({ status: 200, type: UserPaginatedResponseDto })
   findAll(
     @Query() pagination: UserListQueryDto,
   ): Promise<UserPaginatedResponseDto> {

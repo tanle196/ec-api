@@ -5,6 +5,7 @@ import { UserListQueryDto } from './dto/user-list-query.dto';
 import { User } from './entities/user.entity';
 import { UserMapper } from './mapper/user.mapper';
 import { UserPaginatedResponseDto } from './dto/user-response.dto';
+import { UserProfileDto } from './dto/user-profile.dto';
 
 type SafeUserUpdate = Pick<User, 'fullName' | 'avatar'>;
 
@@ -37,11 +38,7 @@ export class UsersService {
     await this.repo.delete(id);
   }
 
-  async getUserProfile(id: string): Promise<{
-    email: User['email'];
-    roles: string[];
-    permissions: string[];
-  } | null> {
+  async getUserProfile(id: string): Promise<UserProfileDto | null> {
     const user = await this.repo.findOne({
       where: { id },
       relations: ['roles', 'roles.permissions', 'permissions'],
@@ -66,6 +63,7 @@ export class UsersService {
     );
 
     return {
+      name: user.fullName,
       email: user.email,
       roles: roleNames,
       permissions: allPermissions,
@@ -75,7 +73,17 @@ export class UsersService {
   async findAll(query: UserListQueryDto): Promise<UserPaginatedResponseDto> {
     const { page = 1, limit = 20 } = query;
     const [users, total] = await this.repo.findAndCount({
-      select: ['id', 'email', 'fullName', 'avatar', 'createdAt'],
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        avatar: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      relations: {
+        roles: true, // ✅ Join bảng roles
+      },
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,

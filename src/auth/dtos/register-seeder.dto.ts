@@ -8,5 +8,5 @@ export class RegisterSeederDto extends RegisterDto {
     description: 'Roles to assign to the user',
     type: [Role],
   })
-  roles: Role[];
+  roles!: Role[];
 }

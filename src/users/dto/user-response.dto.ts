@@ -1,4 +1,5 @@
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { RoleResponseDto } from '@/roles/dto/role-response.dto';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UserResponseDto {
@@ -19,9 +20,21 @@ export class UserResponseDto {
   fullName!: string;
 
   @ApiProperty({
+    example: [{ id: '123e4567-e89b-12d3-a456-426614174000', name: 'admin' }],
+    description: 'Roles to assign to the user',
+    type: [RoleResponseDto],
+  })
+  roles!: RoleResponseDto[];
+
+  @ApiProperty({
     example: '2026-05-03T10:00:00Z',
   })
   createdAt!: Date;
+
+  @ApiProperty({
+    example: '2026-05-03T10:00:00Z',
+  })
+  updatedAt!: Date;
 }
 
 export class UserPaginatedResponseDto extends PaginatedResponseDto<UserResponseDto> {

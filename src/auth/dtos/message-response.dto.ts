@@ -5,5 +5,5 @@ export class MessageResponseDto {
     example: 'Operation completed successfully',
     description: 'Response message',
   })
-  message: string;
+  message!: string;
 }

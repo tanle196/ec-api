@@ -7,5 +7,5 @@ export class ForgotPasswordDto {
     description: 'Email address to send password reset link',
   })
   @IsEmail()
-  email: string;
+  email!: string;
 }

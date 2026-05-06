@@ -11,7 +11,7 @@ import { DataSource, Repository } from 'typeorm';
 import { RegisterDto } from './dtos/register.dto';
 import { Identity } from './entities/identity.entity';
 import { AuthProvider } from './enums/AuthProvider';
-import { UserResponseDto } from './dtos/user-response.dto';
+import { UserInformationResponseDto } from './dtos/user-response.dto';
 import { User } from '@/users/entities/user.entity';
 import { TypedConfigService } from '@/config/TypedConfigService';
 import { MailService } from '@/mail/mail.service';
@@ -110,7 +110,7 @@ export class AuthService {
   async validateLocalUser(
     email: string,
     password: string,
-  ): Promise<UserResponseDto> {
+  ): Promise<UserInformationResponseDto> {
     const identity = await this.identityRepository
       .createQueryBuilder('identity')
       .leftJoinAndSelect('identity.user', 'user')
@@ -157,7 +157,7 @@ export class AuthService {
     provider: AuthProvider,
     providerUserId: string,
     email?: string,
-  ): Promise<UserResponseDto> {
+  ): Promise<UserInformationResponseDto> {
     const identity = await this.identityRepository
       .createQueryBuilder('identity')
       .leftJoinAndSelect('identity.user', 'user')
@@ -218,7 +218,7 @@ export class AuthService {
     };
   }
 
-  async register({ email, password }: RegisterDto): Promise<UserResponseDto> {
+  async register({ email, password }: RegisterDto): Promise<UserInformationResponseDto> {
     const token = this.generateToken();
     const tokenHash = this.hashToken(token);
     const expires = new Date(Date.now() + 1000 * 60 * 60);
@@ -255,7 +255,7 @@ export class AuthService {
     };
   }
 
-  async activeAccount(token: string): Promise<UserResponseDto> {
+  async activeAccount(token: string): Promise<UserInformationResponseDto> {
     const tokenHash = this.hashToken(token);
     const identity = await this.identityRepository.findOne({
       where: { verificationToken: tokenHash },
