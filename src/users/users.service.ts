@@ -1,8 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import { Permission } from '@/permissions/entities/permission.entity';
+import { Role } from '@/roles/entities/role.entity';
 import { UserListQueryDto } from './dto/user-list-query.dto';
 import { User } from './entities/user.entity';
+import { UserDetailDto } from './dto/user-detail.dto';
 import { UserMapper } from './mapper/user.mapper';
 import { UserPaginatedResponseDto } from './dto/user-response.dto';
 import { UserProfileDto } from './dto/user-profile.dto';
@@ -13,6 +16,9 @@ type SafeUserUpdate = Pick<User, 'fullName' | 'avatar'>;
 export class UsersService {
   constructor(
     @InjectRepository(User) private readonly repo: Repository<User>,
+    @InjectRepository(Role) private readonly roleRepo: Repository<Role>,
+    @InjectRepository(Permission)
+    private readonly permissionRepo: Repository<Permission>,
   ) {}
 
   findById(id: string): Promise<User | null> {
@@ -26,6 +32,25 @@ export class UsersService {
     });
   }
 
+  async findByIdWithRelations(id: string): Promise<UserDetailDto> {
+    const user = await this.repo.findOne({
+      where: { id },
+      relations: ['roles', 'permissions'],
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      avatar: user.avatar,
+      roles: user.roles ?? [],
+      permissions: user.permissions ?? [],
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  }
+
   async update(
     id: string,
     data: Partial<SafeUserUpdate>,
@@ -34,8 +59,43 @@ export class UsersService {
     return this.findById(id);
   }
 
-  async delete(id: string | number): Promise<void> {
-    await this.repo.delete(id);
+  async delete(id: string): Promise<void> {
+    const user = await this.findById(id);
+    if (!user) throw new NotFoundException('User not found');
+    await this.repo.remove(user);
+  }
+
+  async assignRoles(userId: string, roleIds: string[]): Promise<UserDetailDto> {
+    const user = await this.repo.findOne({
+      where: { id: userId },
+      relations: ['roles', 'permissions'],
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    user.roles = roleIds.length
+      ? await this.roleRepo.findBy({ id: In(roleIds) })
+      : [];
+
+    await this.repo.save(user);
+    return this.findByIdWithRelations(userId);
+  }
+
+  async assignPermissions(
+    userId: string,
+    permissionIds: string[],
+  ): Promise<UserDetailDto> {
+    const user = await this.repo.findOne({
+      where: { id: userId },
+      relations: ['roles', 'permissions'],
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    user.permissions = permissionIds.length
+      ? await this.permissionRepo.findBy({ id: In(permissionIds) })
+      : [];
+
+    await this.repo.save(user);
+    return this.findByIdWithRelations(userId);
   }
 
   async getUserProfile(id: string): Promise<UserProfileDto | null> {
@@ -81,9 +141,7 @@ export class UsersService {
         createdAt: true,
         updatedAt: true,
       },
-      relations: {
-        roles: true, // ✅ Join bảng roles
-      },
+      relations: { roles: true },
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,

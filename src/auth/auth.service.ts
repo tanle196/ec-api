@@ -218,7 +218,10 @@ export class AuthService {
     };
   }
 
-  async register({ email, password }: RegisterDto): Promise<UserInformationResponseDto> {
+  async register({
+    email,
+    password,
+  }: RegisterDto): Promise<UserInformationResponseDto> {
     const token = this.generateToken();
     const tokenHash = this.hashToken(token);
     const expires = new Date(Date.now() + 1000 * 60 * 60);

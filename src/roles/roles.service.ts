@@ -6,11 +6,13 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Permission } from '@/permissions/entities/permission.entity';
-import { In, Repository } from 'typeorm';
+import { ILike, In, Repository } from 'typeorm';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { Role } from './entities/role.entity';
 import { UpdateRoleDto } from './dto/update-role.dto';
-import { PaginationDto } from '@/common/dto/pagination.dto';
+import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { RoleResponseDto } from './dto/role-response.dto';
+import { RoleListQueryDto } from './dto/role-list-query.dto';
 
 @Injectable()
 export class RolesService {
@@ -42,9 +44,12 @@ export class RolesService {
     return this.repo.save(newRole);
   }
 
-  async findAll(pagination: PaginationDto) {
-    const { page = 1, limit = 20 } = pagination;
+  async findAll(
+    query: RoleListQueryDto,
+  ): Promise<PaginatedResponseDto<RoleResponseDto>> {
+    const { page = 1, limit = 20, name } = query;
     const [roles, total] = await this.repo.findAndCount({
+      where: name ? { name: ILike(`%${name}%`) } : {},
       relations: ['permissions'],
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
@@ -56,10 +61,13 @@ export class RolesService {
         id: r.id,
         name: r.name,
         description: r.description,
-        permissionsCount: r.permissions?.length ?? 0,
+        permissions: r.permissions,
         createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
       })),
       total,
+      page,
+      limit,
     };
   }
 

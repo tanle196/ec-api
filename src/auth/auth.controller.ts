@@ -58,7 +58,9 @@ export class AuthController {
     description: 'User registered successfully',
     type: UserInformationResponseDto,
   })
-  async register(@Body() registerDto: RegisterDto): Promise<UserInformationResponseDto> {
+  async register(
+    @Body() registerDto: RegisterDto,
+  ): Promise<UserInformationResponseDto> {
     return this.authService.register(registerDto);
   }
 
@@ -70,7 +72,9 @@ export class AuthController {
     description: 'Account activated successfully',
     type: UserInformationResponseDto,
   })
-  async active(@Body() activeDto: ActiveDto): Promise<UserInformationResponseDto> {
+  async active(
+    @Body() activeDto: ActiveDto,
+  ): Promise<UserInformationResponseDto> {
     return this.authService.activeAccount(activeDto.token);
   }
 

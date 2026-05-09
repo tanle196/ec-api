@@ -9,7 +9,9 @@ import { Repository } from 'typeorm';
 import { Permission } from './entities/permission.entity';
 import { CreatePermissionDto } from './dto/create-permission.dto';
 import { UpdatePermissionDto } from './dto/update-permission.dto';
-import { PaginationDto } from '@/common/dto/pagination.dto';
+import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { PermissionListQueryDto } from './dto/permission-list-query.dto';
+import { PermissionResponseDto } from './dto/permission-response.dto';
 
 @Injectable()
 export class PermissionsService {
@@ -37,15 +39,21 @@ export class PermissionsService {
   }
 
   async findAll(
-    pagination: PaginationDto,
-  ): Promise<{ data: Permission[]; total: number }> {
-    const { page = 1, limit = 20 } = pagination;
+    query: PermissionListQueryDto,
+  ): Promise<PaginatedResponseDto<PermissionResponseDto>> {
+    const { page = 1, limit = 20, module, action } = query;
+    const where: Record<string, unknown> = {};
+    if (module) where.module = module;
+    if (action) where.action = action;
+
     const [data, total] = await this.permissionRepo.findAndCount({
+      where,
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });
-    return { data, total };
+
+    return { data, total, page, limit };
   }
 
   async findOne(id: string): Promise<Permission> {

@@ -18,21 +18,25 @@ import {
   ApiOkResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
-import { PaginationDto } from '@/common/dto/pagination.dto';
 import { CreatePermissionDto } from './dto/create-permission.dto';
+import { PermissionListQueryDto } from './dto/permission-list-query.dto';
+import { PermissionPaginatedResponseDto } from './dto/permission-response.dto';
 import { PermissionsService } from './permissions.service';
 import { Permission } from './entities/permission.entity';
 import { UpdatePermissionDto } from './dto/update-permission.dto';
 import { PermissionMetaResponseDto } from './dto/permission-meta-response.dto';
+import { Permissions } from './decorators/permissions.decorator';
+import { PermissionsGuard } from './guards/permissions.guard';
 
 @ApiTags('permissions')
 @Controller('permissions')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @ApiBearerAuth('access-token')
 export class PermissionsController {
   constructor(private readonly service: PermissionsService) {}
 
   @Post()
+  @Permissions('permission.create')
   @ApiOperation({ summary: 'Create a new permission' })
   @ApiResponse({ status: 201, type: Permission })
   create(@Body() dto: CreatePermissionDto) {
@@ -40,6 +44,7 @@ export class PermissionsController {
   }
 
   @Get('meta')
+  @Permissions('permission.read')
   @ApiOperation({
     summary: 'Get permission metadata for frontend',
     description:
@@ -51,13 +56,15 @@ export class PermissionsController {
   }
 
   @Get()
+  @Permissions('permission.read')
   @ApiOperation({ summary: 'List permissions (paginated)' })
-  @ApiResponse({ status: 200, type: [Permission] })
-  findAll(@Query() pagination: PaginationDto) {
-    return this.service.findAll(pagination);
+  @ApiResponse({ status: 200, type: PermissionPaginatedResponseDto })
+  findAll(@Query() query: PermissionListQueryDto) {
+    return this.service.findAll(query);
   }
 
   @Get(':id')
+  @Permissions('permission.read')
   @ApiOperation({ summary: 'Get permission by id' })
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiResponse({ status: 200, type: Permission })
@@ -66,6 +73,7 @@ export class PermissionsController {
   }
 
   @Put(':id')
+  @Permissions('permission.update')
   @ApiOperation({ summary: 'Update permission' })
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiResponse({ status: 200, type: Permission })
@@ -74,6 +82,7 @@ export class PermissionsController {
   }
 
   @Delete(':id')
+  @Permissions('permission.delete')
   @ApiOperation({ summary: 'Delete permission' })
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiResponse({ status: 200, description: 'Permission deleted' })

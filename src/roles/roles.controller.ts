@@ -20,21 +20,27 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
-import { PaginationDto } from '@/common/dto/pagination.dto';
+import { Permissions } from '@/permissions/decorators/permissions.decorator';
+import { PermissionsGuard } from '@/permissions/guards/permissions.guard';
 import { RolesService } from './roles.service';
 import { CreateRoleDto } from './dto/create-role.dto';
-import { RoleResponseDto } from './dto/role-response.dto';
+import { RoleListQueryDto } from './dto/role-list-query.dto';
+import {
+  RolePaginatedResponseDto,
+  RoleResponseDto,
+} from './dto/role-response.dto';
 import { AssignPermissionsDto } from './dto/assign-permissions.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 
 @ApiTags('roles')
 @Controller('roles')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @ApiBearerAuth('access-token')
 export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
   @Post()
+  @Permissions('role.create')
   @ApiOperation({ summary: 'Create a new role' })
   @ApiBody({ type: CreateRoleDto })
   @ApiResponse({
@@ -49,13 +55,15 @@ export class RolesController {
   }
 
   @Get()
+  @Permissions('role.read')
   @ApiOperation({ summary: 'List roles (paginated)' })
-  @ApiOkResponse({ type: [RoleResponseDto] })
-  findAll(@Query() pagination: PaginationDto) {
-    return this.rolesService.findAll(pagination);
+  @ApiResponse({ status: 200, type: RolePaginatedResponseDto })
+  findAll(@Query() query: RoleListQueryDto) {
+    return this.rolesService.findAll(query);
   }
 
   @Get(':id')
+  @Permissions('role.read')
   @ApiOperation({ summary: 'Get role by id' })
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: RoleResponseDto })
@@ -64,6 +72,7 @@ export class RolesController {
   }
 
   @Patch(':id')
+  @Permissions('role.update')
   @ApiOperation({ summary: 'Update role' })
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: RoleResponseDto })
@@ -72,6 +81,7 @@ export class RolesController {
   }
 
   @Delete(':id')
+  @Permissions('role.delete')
   @ApiOperation({ summary: 'Delete role (not applicable to ADMIN)' })
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ schema: { example: { success: true } } })
@@ -80,6 +90,7 @@ export class RolesController {
   }
 
   @Put(':id/permissions')
+  @Permissions('role.update')
   @ApiOperation({ summary: 'Assign permissions to role' })
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: RoleResponseDto })
