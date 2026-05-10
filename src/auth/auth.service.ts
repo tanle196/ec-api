@@ -372,7 +372,7 @@ export class AuthService {
     await this.identityRepository.save(identity);
 
     const appDomain = this.configService.getAppConfig().appDomain;
-    const resetUrl = `${appDomain}/auth/forgot-password?token=${token}`;
+    const resetUrl = `${appDomain}/reset-password?token=${token}`;
     await this.mailService.sendForgotPassword(email, resetUrl);
   }
 
