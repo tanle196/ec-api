@@ -12,6 +12,7 @@ import { RegisterDto } from './dtos/register.dto';
 import { Identity } from './entities/identity.entity';
 import { AuthProvider } from './enums/AuthProvider';
 import { UserInformationResponseDto } from './dtos/user-response.dto';
+import { MessageResponseDto } from './dtos/message-response.dto';
 import { User } from '@/users/entities/user.entity';
 import { TypedConfigService } from '@/config/TypedConfigService';
 import { MailService } from '@/mail/mail.service';
@@ -221,41 +222,95 @@ export class AuthService {
   async register({
     email,
     password,
-  }: RegisterDto): Promise<UserInformationResponseDto> {
-    const token = this.generateToken();
-    const tokenHash = this.hashToken(token);
-    const expires = new Date(Date.now() + 1000 * 60 * 60);
-    const passwordHash = await this.hashedPassword(password);
+  }: RegisterDto): Promise<MessageResponseDto> {
+    try {
+      const existing = await this.userService.findByEmail(email);
+      if (existing) {
+        const localIdentity = existing.identities?.find(
+          (i) => i.provider === AuthProvider.LOCAL,
+        );
 
-    const user = await this.dataSource.transaction(async (manager) => {
-      const userRepo = manager.getRepository(User);
-      const identityRepo = manager.getRepository(Identity);
+        const isExpired =
+          localIdentity &&
+          !localIdentity.isActive &&
+          (!localIdentity.verificationTokenExpires ||
+            localIdentity.verificationTokenExpires < new Date());
 
-      const newUser = userRepo.create({ email });
-      await userRepo.save(newUser);
+        if (isExpired) {
+          const { token, tokenHash, expires } = this.createVerificationToken();
+          const passwordHash = await this.hashedPassword(password);
+          await this.identityRepository.update(localIdentity.id, {
+            verificationToken: tokenHash,
+            verificationTokenExpires: expires,
+            passwordHash,
+          });
+          void this.mailService.sendVerificationEmail(
+            email,
+            this.buildVerifyUrl(token),
+          );
+        }
 
-      const identity = identityRepo.create({
-        provider: AuthProvider.LOCAL,
-        providerUserId: email,
-        passwordHash,
-        user: newUser,
-        verificationToken: tokenHash,
-        verificationTokenExpires: expires,
+        return {
+          message:
+            'If this email is not yet registered, a verification link has been sent.',
+        };
+      }
+
+      const { token, tokenHash, expires } = this.createVerificationToken();
+      const passwordHash = await this.hashedPassword(password);
+
+      await this.dataSource.transaction(async (manager) => {
+        const userRepo = manager.getRepository(User);
+        const identityRepo = manager.getRepository(Identity);
+
+        const newUser = await userRepo.save(userRepo.create({ email }));
+
+        await identityRepo.save(
+          identityRepo.create({
+            provider: AuthProvider.LOCAL,
+            providerUserId: email,
+            passwordHash,
+            user: newUser,
+            verificationToken: tokenHash,
+            verificationTokenExpires: expires,
+          }),
+        );
       });
-      await identityRepo.save(identity);
 
-      return newUser;
-    });
+      void this.mailService.sendVerificationEmail(
+        email,
+        this.buildVerifyUrl(token),
+      );
 
-    const appDomain = this.configService.getAppConfig().appDomain;
-    const verifyUrl = `${appDomain}/auth/verify-email?token=${token}`;
-    void this.mailService.sendVerificationEmail(email, verifyUrl);
+      return {
+        message:
+          'If this email is not yet registered, a verification link has been sent.',
+      };
+    } catch (error) {
+      console.log(error);
+      return {
+        message:
+          'If this email is not yet registered, a verification link has been sent.',
+      };
+    }
+  }
 
+  private createVerificationToken(): {
+    token: string;
+    tokenHash: string;
+    expires: Date;
+  } {
+    const token = this.generateToken();
     return {
-      id: user.id,
-      email: user.email,
-      fullName: user.fullName,
+      token,
+      tokenHash: this.hashToken(token),
+      expires: new Date(Date.now() + 60 * 60 * 1000),
     };
+  }
+
+  private buildVerifyUrl(token: string): string {
+    const { appDomain } = this.configService.getAppConfig();
+    return `${appDomain}/verify-email?token=${token}`;
   }
 
   async activeAccount(token: string): Promise<UserInformationResponseDto> {

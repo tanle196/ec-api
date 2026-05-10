@@ -56,11 +56,11 @@ export class AuthController {
   @ApiResponse({
     status: 201,
     description: 'User registered successfully',
-    type: UserInformationResponseDto,
+    type: MessageResponseDto,
   })
   async register(
     @Body() registerDto: RegisterDto,
-  ): Promise<UserInformationResponseDto> {
+  ): Promise<MessageResponseDto> {
     return this.authService.register(registerDto);
   }
 
