@@ -4,6 +4,7 @@ import { seedPermissions } from './permission.seed';
 import { seedRoles } from './role.seed';
 import { seedUsers } from './user.seed';
 import { seedCategories } from './category.seed';
+import { seedProducts } from './product.seed';
 
 async function main() {
   console.log('Connecting to database...');
@@ -22,6 +23,9 @@ async function main() {
 
     console.log('\n--- Seeding categories ---');
     await seedCategories(AppDataSource);
+
+    console.log('\n--- Seeding products ---');
+    await seedProducts(AppDataSource);
 
     console.log('\nSeed completed successfully.');
   } catch (err) {

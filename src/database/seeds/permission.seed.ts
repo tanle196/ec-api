@@ -90,6 +90,38 @@ const PERMISSIONS: Pick<
     isSystem: true,
   },
 
+  // products
+  {
+    module: 'product',
+    action: PermissionAction.CREATE,
+    description: 'Tạo sản phẩm',
+    isSystem: true,
+  },
+  {
+    module: 'product',
+    action: PermissionAction.READ,
+    description: 'Xem danh sách sản phẩm',
+    isSystem: true,
+  },
+  {
+    module: 'product',
+    action: PermissionAction.UPDATE,
+    description: 'Cập nhật sản phẩm',
+    isSystem: true,
+  },
+  {
+    module: 'product',
+    action: PermissionAction.DELETE,
+    description: 'Xoá sản phẩm',
+    isSystem: true,
+  },
+  {
+    module: 'product',
+    action: PermissionAction.PUBLISH,
+    description: 'Xuất bản / ẩn sản phẩm',
+    isSystem: true,
+  },
+
   // permissions
   {
     module: 'permission',
