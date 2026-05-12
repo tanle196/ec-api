@@ -64,6 +64,32 @@ const PERMISSIONS: Pick<
     isSystem: true,
   },
 
+  // categories
+  {
+    module: 'category',
+    action: PermissionAction.CREATE,
+    description: 'Tạo danh mục',
+    isSystem: true,
+  },
+  {
+    module: 'category',
+    action: PermissionAction.READ,
+    description: 'Xem danh sách danh mục',
+    isSystem: true,
+  },
+  {
+    module: 'category',
+    action: PermissionAction.UPDATE,
+    description: 'Cập nhật danh mục',
+    isSystem: true,
+  },
+  {
+    module: 'category',
+    action: PermissionAction.DELETE,
+    description: 'Xoá danh mục',
+    isSystem: true,
+  },
+
   // permissions
   {
     module: 'permission',
