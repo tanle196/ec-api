@@ -122,6 +122,20 @@ const PERMISSIONS: Pick<
     isSystem: true,
   },
 
+  // orders
+  {
+    module: 'order',
+    action: PermissionAction.READ,
+    description: 'Xem danh sách đơn hàng',
+    isSystem: true,
+  },
+  {
+    module: 'order',
+    action: PermissionAction.UPDATE,
+    description: 'Cập nhật trạng thái đơn hàng',
+    isSystem: true,
+  },
+
   // permissions
   {
     module: 'permission',

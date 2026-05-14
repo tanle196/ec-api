@@ -25,6 +25,8 @@ const ROLES: RoleSeedData[] = [
       { module: 'user', action: 'assign.role' },
       { module: 'role', action: 'read' },
       { module: 'permission', action: 'read' },
+      { module: 'order', action: 'read' },
+      { module: 'order', action: 'update' },
     ],
   },
   {

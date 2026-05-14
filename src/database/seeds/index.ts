@@ -6,6 +6,7 @@ import { seedUsers } from './user.seed';
 import { seedCategories } from './category.seed';
 import { seedProducts } from './product.seed';
 import { seedAddresses } from './address.seed';
+import { seedOrders } from './order.seed';
 
 async function main() {
   console.log('Connecting to database...');
@@ -30,6 +31,9 @@ async function main() {
 
     console.log('\n--- Seeding addresses ---');
     await seedAddresses(AppDataSource);
+
+    console.log('\n--- Seeding orders ---');
+    await seedOrders(AppDataSource);
 
     console.log('\nSeed completed successfully.');
   } catch (err) {
