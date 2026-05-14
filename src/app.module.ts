@@ -11,6 +11,7 @@ import { RolesModule } from './roles/roles.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ProductsModule } from './products/products.module';
+import { AddressesModule } from './addresses/addresses.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ProductsModule } from './products/products.module';
     PermissionsModule,
     CategoriesModule,
     ProductsModule,
+    AddressesModule,
   ],
   controllers: [AppController],
   providers: [

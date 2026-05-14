@@ -1,4 +1,5 @@
 import { Identity } from '@/auth/entities/identity.entity';
+import { Address } from '@/addresses/entities/address.entity';
 import { Permission } from '@/permissions/entities/permission.entity';
 import { Role } from '@/roles/entities/role.entity';
 import {
@@ -34,6 +35,9 @@ export class User {
 
   @OneToMany(() => Identity, (identity) => identity.user)
   identities!: Identity[];
+
+  @OneToMany(() => Address, (address) => address.user)
+  addresses!: Address[];
 
   @ManyToMany(() => Role, (role) => role.users)
   @JoinTable({
