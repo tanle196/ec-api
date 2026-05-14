@@ -136,6 +136,20 @@ const PERMISSIONS: Pick<
     isSystem: true,
   },
 
+  // payments
+  {
+    module: 'payment',
+    action: PermissionAction.READ,
+    description: 'Xem danh sách thanh toán',
+    isSystem: true,
+  },
+  {
+    module: 'payment',
+    action: PermissionAction.UPDATE,
+    description: 'Cập nhật trạng thái thanh toán',
+    isSystem: true,
+  },
+
   // permissions
   {
     module: 'permission',
