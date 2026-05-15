@@ -150,6 +150,26 @@ const PERMISSIONS: Pick<
     isSystem: true,
   },
 
+  // reviews
+  {
+    module: 'review',
+    action: PermissionAction.READ,
+    description: 'Xem tất cả đánh giá (admin)',
+    isSystem: true,
+  },
+  {
+    module: 'review',
+    action: PermissionAction.UPDATE,
+    description: 'Duyệt / từ chối đánh giá',
+    isSystem: true,
+  },
+  {
+    module: 'review',
+    action: PermissionAction.DELETE,
+    description: 'Xoá đánh giá',
+    isSystem: true,
+  },
+
   // permissions
   {
     module: 'permission',

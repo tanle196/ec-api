@@ -9,6 +9,7 @@ import { seedAddresses } from './address.seed';
 import { seedOrders } from './order.seed';
 import { seedPayments } from './payment.seed';
 import { seedCarts } from './cart.seed';
+import { seedReviews } from './review.seed';
 
 async function main() {
   console.log('Connecting to database...');
@@ -42,6 +43,9 @@ async function main() {
 
     console.log('\n--- Seeding carts ---');
     await seedCarts(AppDataSource);
+
+    console.log('\n--- Seeding reviews ---');
+    await seedReviews(AppDataSource);
 
     console.log('\nSeed completed successfully.');
   } catch (err) {
