@@ -195,6 +195,66 @@ const PERMISSIONS: Pick<
     description: 'Xoá permission',
     isSystem: true,
   },
+
+  // addresses
+  {
+    module: 'address',
+    action: PermissionAction.READ,
+    description: 'Xem tất cả địa chỉ (admin)',
+    isSystem: true,
+  },
+  {
+    module: 'address',
+    action: PermissionAction.CREATE,
+    description: 'Tạo địa chỉ cho người dùng',
+    isSystem: true,
+  },
+  {
+    module: 'address',
+    action: PermissionAction.UPDATE,
+    description: 'Cập nhật địa chỉ bất kỳ',
+    isSystem: true,
+  },
+  {
+    module: 'address',
+    action: PermissionAction.DELETE,
+    description: 'Xoá địa chỉ bất kỳ',
+    isSystem: true,
+  },
+
+  // carts
+  {
+    module: 'cart',
+    action: PermissionAction.READ,
+    description: 'Xem tất cả giỏ hàng (admin)',
+    isSystem: true,
+  },
+  {
+    module: 'cart',
+    action: PermissionAction.UPDATE,
+    description: 'Cập nhật giỏ hàng bất kỳ',
+    isSystem: true,
+  },
+  {
+    module: 'cart',
+    action: PermissionAction.DELETE,
+    description: 'Xoá / xoá trắng giỏ hàng bất kỳ',
+    isSystem: true,
+  },
+
+  // wishlists
+  {
+    module: 'wishlist',
+    action: PermissionAction.READ,
+    description: 'Xem tất cả wishlist (admin)',
+    isSystem: true,
+  },
+  {
+    module: 'wishlist',
+    action: PermissionAction.DELETE,
+    description: 'Xoá sản phẩm khỏi wishlist bất kỳ',
+    isSystem: true,
+  },
 ];
 
 export async function seedPermissions(
