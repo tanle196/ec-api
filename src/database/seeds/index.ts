@@ -8,6 +8,7 @@ import { seedProducts } from './product.seed';
 import { seedAddresses } from './address.seed';
 import { seedOrders } from './order.seed';
 import { seedPayments } from './payment.seed';
+import { seedCarts } from './cart.seed';
 
 async function main() {
   console.log('Connecting to database...');
@@ -38,6 +39,9 @@ async function main() {
 
     console.log('\n--- Seeding payments ---');
     await seedPayments(AppDataSource);
+
+    console.log('\n--- Seeding carts ---');
+    await seedCarts(AppDataSource);
 
     console.log('\nSeed completed successfully.');
   } catch (err) {
