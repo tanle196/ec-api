@@ -1,10 +1,13 @@
 import { Address } from '@/addresses/entities/address.entity';
+import { Discount } from '@/discounts/entities/discount.entity';
 import { User } from '@/users/entities/user.entity';
 import {
   Column,
   CreateDateColumn,
   Entity,
   JoinColumn,
+  JoinTable,
+  ManyToMany,
   ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
@@ -62,6 +65,14 @@ export class Order {
     eager: false,
   })
   items!: OrderItem[];
+
+  @ManyToMany(() => Discount, { eager: false })
+  @JoinTable({
+    name: 'order_discount',
+    joinColumn: { name: 'order_id' },
+    inverseJoinColumn: { name: 'discount_id' },
+  })
+  discounts!: Discount[];
 
   @CreateDateColumn({ type: 'timestamp' })
   createdAt!: Date;

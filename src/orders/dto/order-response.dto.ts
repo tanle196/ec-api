@@ -1,6 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { DiscountType } from '@/discounts/enums/discount-type.enum';
 import { OrderStatus } from '../enums/order-status.enum';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+
+export class AppliedDiscountDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() code!: string;
+  @ApiProperty({ enum: DiscountType }) type!: DiscountType;
+  @ApiProperty() value!: number;
+}
 
 export class OrderItemResponseDto {
   @ApiProperty() id!: string;
@@ -25,6 +33,7 @@ export class OrderResponseDto {
   @ApiProperty() total!: number;
   @ApiPropertyOptional() notes!: string | null;
   @ApiProperty({ type: [OrderItemResponseDto] }) items!: OrderItemResponseDto[];
+  @ApiProperty({ type: [AppliedDiscountDto] }) discounts!: AppliedDiscountDto[];
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;
 }

@@ -7,7 +7,10 @@ export class ValidateDiscountDto {
   @IsNotEmpty()
   code!: string;
 
-  @ApiProperty({ example: 500000, description: 'Order subtotal to calculate discount against' })
+  @ApiProperty({
+    example: 500000,
+    description: 'Order subtotal to calculate discount against',
+  })
   @IsNumber()
   @Min(0)
   subtotal!: number;

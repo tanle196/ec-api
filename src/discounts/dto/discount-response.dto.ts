@@ -27,5 +27,6 @@ export class ValidateDiscountResponseDto {
   @ApiProperty() code!: string;
   @ApiProperty({ enum: DiscountType }) type!: DiscountType;
   @ApiProperty() value!: number;
-  @ApiProperty({ description: 'Computed discount amount in VND' }) discountAmount!: number;
+  @ApiProperty({ description: 'Computed discount amount in VND' })
+  discountAmount!: number;
 }

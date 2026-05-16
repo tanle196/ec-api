@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Address } from '@/addresses/entities/address.entity';
 import { ProductVariant } from '@/products/entities/product-variant.entity';
+import { Discount } from '@/discounts/entities/discount.entity';
 import { DiscountsModule } from '@/discounts/discounts.module';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
@@ -10,7 +11,13 @@ import { OrdersService } from './orders.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderItem, Address, ProductVariant]),
+    TypeOrmModule.forFeature([
+      Order,
+      OrderItem,
+      Address,
+      ProductVariant,
+      Discount,
+    ]),
     DiscountsModule,
   ],
   controllers: [OrdersController],

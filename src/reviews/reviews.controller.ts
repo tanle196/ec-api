@@ -99,7 +99,9 @@ export class ReviewsController {
   @Permissions('review.read')
   @ApiOperation({ summary: '(Admin) List all reviews with filters' })
   @ApiOkResponse({ type: ReviewPaginatedResponseDto })
-  findAll(@Query() query: ReviewListQueryDto): Promise<ReviewPaginatedResponseDto> {
+  findAll(
+    @Query() query: ReviewListQueryDto,
+  ): Promise<ReviewPaginatedResponseDto> {
     return this.reviewsService.findAll(query);
   }
 

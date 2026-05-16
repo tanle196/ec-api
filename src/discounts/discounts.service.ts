@@ -101,10 +101,7 @@ export class DiscountsService {
    * Used internally by OrdersService to apply a code during order creation.
    * Returns the discount entity and computed amount.
    */
-  async resolveCode(
-    code: string,
-    subtotal: number,
-  ): Promise<Discount> {
+  async resolveCode(code: string, subtotal: number): Promise<Discount> {
     const discount = await this.discountRepo.findOne({
       where: { code: code.toUpperCase() },
     });
@@ -123,7 +120,9 @@ export class DiscountsService {
       discount.usageLimit !== null &&
       discount.usedCount >= discount.usageLimit
     )
-      throw new BadRequestException('Discount code has reached its usage limit');
+      throw new BadRequestException(
+        'Discount code has reached its usage limit',
+      );
 
     if (
       discount.minOrderValue !== null &&

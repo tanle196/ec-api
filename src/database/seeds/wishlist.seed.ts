@@ -36,7 +36,9 @@ export async function seedWishlists(dataSource: DataSource): Promise<void> {
       where: { sku: data.variantSku },
     });
     if (!variant) {
-      console.warn(`  [!] Variant SKU "${data.variantSku}" not found, skipping`);
+      console.warn(
+        `  [!] Variant SKU "${data.variantSku}" not found, skipping`,
+      );
       continue;
     }
 

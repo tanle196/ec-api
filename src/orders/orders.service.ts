@@ -177,7 +177,7 @@ export class OrdersService {
   async findOne(id: string, userId?: string): Promise<Order> {
     const order = await this.orderRepo.findOne({
       where: { id },
-      relations: ['items', 'address'],
+      relations: ['items', 'address', 'discounts'],
     });
 
     if (!order) throw new NotFoundException('Order not found');

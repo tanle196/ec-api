@@ -1,7 +1,6 @@
 import { DataSource } from 'typeorm';
 import { Review } from '@/reviews/entities/review.entity';
 import { User } from '@/users/entities/user.entity';
-import { Product } from '@/products/entities/product.entity';
 import { ProductVariant } from '@/products/entities/product-variant.entity';
 import { Order } from '@/orders/entities/order.entity';
 import { OrderStatus } from '@/orders/enums/order-status.enum';
@@ -53,7 +52,8 @@ const REVIEWS: ReviewSeedData[] = [
     variantSku: 'LAMP-LED-WHT',
     rating: 3,
     title: 'Tạm được',
-    content: 'Đèn sáng vừa phải, cảm ứng đôi khi hơi nhạy. Giá tầm trung thì chấp nhận được.',
+    content:
+      'Đèn sáng vừa phải, cảm ứng đôi khi hơi nhạy. Giá tầm trung thì chấp nhận được.',
     isApproved: false,
   },
 ];
@@ -92,7 +92,9 @@ export async function seedReviews(dataSource: DataSource): Promise<void> {
       where: { sku: data.variantSku },
     });
     if (!variant) {
-      console.warn(`  [!] Variant SKU "${data.variantSku}" not found, skipping`);
+      console.warn(
+        `  [!] Variant SKU "${data.variantSku}" not found, skipping`,
+      );
       continue;
     }
 
@@ -102,7 +104,9 @@ export async function seedReviews(dataSource: DataSource): Promise<void> {
       where: { user_id: user.id, product_id: productId },
     });
     if (existing) {
-      console.log(`  [~] Review by "${data.userEmail}" for product ${productId} already exists`);
+      console.log(
+        `  [~] Review by "${data.userEmail}" for product ${productId} already exists`,
+      );
       continue;
     }
 

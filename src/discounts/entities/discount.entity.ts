@@ -2,9 +2,11 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  ManyToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { Order } from '@/orders/entities/order.entity';
 import { DiscountType } from '../enums/discount-type.enum';
 
 @Entity('discounts')
@@ -44,4 +46,7 @@ export class Discount {
 
   @UpdateDateColumn({ type: 'timestamp' })
   updatedAt!: Date;
+
+  @ManyToMany('Order', 'discounts', { eager: false })
+  orders!: Order[];
 }

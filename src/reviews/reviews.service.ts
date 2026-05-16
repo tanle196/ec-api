@@ -56,7 +56,15 @@ export class ReviewsService {
   async findAll(
     query: ReviewListQueryDto,
   ): Promise<PaginatedResponseDto<Review>> {
-    const { page = 1, limit = 20, product_id, user_id, rating, isApproved, isVerified } = query;
+    const {
+      page = 1,
+      limit = 20,
+      product_id,
+      user_id,
+      rating,
+      isApproved,
+      isVerified,
+    } = query;
 
     const qb = this.reviewRepo
       .createQueryBuilder('r')
@@ -65,8 +73,10 @@ export class ReviewsService {
     if (product_id) qb.andWhere('r.product_id = :product_id', { product_id });
     if (user_id) qb.andWhere('r.user_id = :user_id', { user_id });
     if (rating !== undefined) qb.andWhere('r.rating = :rating', { rating });
-    if (isApproved !== undefined) qb.andWhere('r.isApproved = :isApproved', { isApproved });
-    if (isVerified !== undefined) qb.andWhere('r.isVerified = :isVerified', { isVerified });
+    if (isApproved !== undefined)
+      qb.andWhere('r.isApproved = :isApproved', { isApproved });
+    if (isVerified !== undefined)
+      qb.andWhere('r.isVerified = :isVerified', { isVerified });
 
     const [data, total] = await qb
       .orderBy('r.createdAt', 'DESC')

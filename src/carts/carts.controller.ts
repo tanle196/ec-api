@@ -39,7 +39,9 @@ export class CartsController {
   }
 
   @Post('me/items')
-  @ApiOperation({ summary: 'Add item to cart (merges quantity if variant already in cart)' })
+  @ApiOperation({
+    summary: 'Add item to cart (merges quantity if variant already in cart)',
+  })
   @ApiOkResponse({ type: CartResponseDto })
   addItem(
     @CurrentUser() user: ICurrentUser,

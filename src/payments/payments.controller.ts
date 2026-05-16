@@ -77,7 +77,9 @@ export class PaymentsController {
   @Permissions('payment.read')
   @ApiOperation({ summary: 'Admin: list all payments' })
   @ApiOkResponse({ type: PaymentPaginatedResponseDto })
-  findAll(@Query() query: PaymentQueryDto): Promise<PaymentPaginatedResponseDto> {
+  findAll(
+    @Query() query: PaymentQueryDto,
+  ): Promise<PaymentPaginatedResponseDto> {
     return this.paymentsService.findAll(query, undefined, true);
   }
 

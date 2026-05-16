@@ -26,18 +26,27 @@ export class CreateDiscountDto {
   @IsEnum(DiscountType)
   type!: DiscountType;
 
-  @ApiProperty({ example: 20, description: 'Percent (0–100) or fixed amount in VND' })
+  @ApiProperty({
+    example: 20,
+    description: 'Percent (0–100) or fixed amount in VND',
+  })
   @IsNumber()
   @IsPositive()
   value!: number;
 
-  @ApiPropertyOptional({ example: 100000, description: 'Minimum subtotal to apply' })
+  @ApiPropertyOptional({
+    example: 100000,
+    description: 'Minimum subtotal to apply',
+  })
   @IsNumber()
   @Min(0)
   @IsOptional()
   minOrderValue?: number;
 
-  @ApiPropertyOptional({ example: 100, description: 'Max total usages (null = unlimited)' })
+  @ApiPropertyOptional({
+    example: 100,
+    description: 'Max total usages (null = unlimited)',
+  })
   @IsInt()
   @Min(1)
   @IsOptional()
