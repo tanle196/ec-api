@@ -255,6 +255,32 @@ const PERMISSIONS: Pick<
     description: 'Xoá sản phẩm khỏi wishlist bất kỳ',
     isSystem: true,
   },
+
+  // discounts
+  {
+    module: 'discount',
+    action: PermissionAction.CREATE,
+    description: 'Tạo mã giảm giá',
+    isSystem: true,
+  },
+  {
+    module: 'discount',
+    action: PermissionAction.READ,
+    description: 'Xem danh sách mã giảm giá',
+    isSystem: true,
+  },
+  {
+    module: 'discount',
+    action: PermissionAction.UPDATE,
+    description: 'Cập nhật mã giảm giá',
+    isSystem: true,
+  },
+  {
+    module: 'discount',
+    action: PermissionAction.DELETE,
+    description: 'Xoá mã giảm giá',
+    isSystem: true,
+  },
 ];
 
 export async function seedPermissions(

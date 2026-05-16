@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Address } from '@/addresses/entities/address.entity';
 import { ProductVariant } from '@/products/entities/product-variant.entity';
+import { DiscountsService } from '@/discounts/discounts.service';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
@@ -34,6 +35,7 @@ export class OrdersService {
     @InjectRepository(ProductVariant)
     private readonly variantRepo: Repository<ProductVariant>,
     private readonly dataSource: DataSource,
+    private readonly discountsService: DiscountsService,
   ) {}
 
   async create(userId: string, dto: CreateOrderDto): Promise<Order> {
@@ -65,36 +67,53 @@ export class OrdersService {
       }
     }
 
-    return this.dataSource.transaction(async (manager) => {
-      let subtotal = 0;
-      const orderItems: Partial<OrderItem>[] = [];
+    let subtotal = 0;
+    const orderItems: Partial<OrderItem>[] = [];
 
+    for (const itemDto of dto.items) {
+      const variant = variantMap.get(itemDto.variant_id)!;
+      const unitPrice = Number(variant.price);
+      const itemTotal = unitPrice * itemDto.quantity;
+      subtotal += itemTotal;
+
+      orderItems.push({
+        variant_id: variant.id,
+        productName: variant.product.name,
+        variantName: variant.name,
+        unitPrice,
+        quantity: itemDto.quantity,
+        total: itemTotal,
+      });
+    }
+
+    let discountAmount = 0;
+    let discountId: string | undefined;
+
+    if (dto.discountCode) {
+      const discountEntity = await this.discountsService.resolveCode(
+        dto.discountCode,
+        subtotal,
+      );
+      discountAmount = this.discountsService.computeAmount(
+        discountEntity,
+        subtotal,
+      );
+      discountId = discountEntity.id;
+    }
+
+    return this.dataSource.transaction(async (manager) => {
       for (const itemDto of dto.items) {
         const variant = variantMap.get(itemDto.variant_id)!;
-        const unitPrice = Number(variant.price);
-        const total = unitPrice * itemDto.quantity;
-        subtotal += total;
-
         await manager.decrement(
           ProductVariant,
           { id: variant.id },
           'stock',
           itemDto.quantity,
         );
-
-        orderItems.push({
-          variant_id: variant.id,
-          productName: variant.product.name,
-          variantName: variant.name,
-          unitPrice,
-          quantity: itemDto.quantity,
-          total,
-        });
       }
 
       const shippingFee = 0;
-      const discount = 0;
-      const total = subtotal + shippingFee - discount;
+      const total = subtotal + shippingFee - discountAmount;
 
       const order = manager.create(Order, {
         user_id: userId,
@@ -103,7 +122,7 @@ export class OrdersService {
         status: OrderStatus.PENDING,
         subtotal,
         shippingFee,
-        discount,
+        discount: discountAmount,
         total,
         notes: dto.notes ?? null,
       });
@@ -116,6 +135,14 @@ export class OrdersService {
           manager.create(OrderItem, { ...item, order_id: savedOrder.id }),
         ),
       );
+
+      if (discountId) {
+        await manager.query(
+          `INSERT INTO "order_discount" ("order_id", "discount_id") VALUES ($1, $2)`,
+          [savedOrder.id, discountId],
+        );
+        await this.discountsService.incrementUsedCount(discountId);
+      }
 
       return this.findOne(savedOrder.id);
     });

@@ -11,6 +11,7 @@ import { seedPayments } from './payment.seed';
 import { seedCarts } from './cart.seed';
 import { seedReviews } from './review.seed';
 import { seedWishlists } from './wishlist.seed';
+import { seedDiscounts } from './discount.seed';
 
 async function main() {
   console.log('Connecting to database...');
@@ -50,6 +51,9 @@ async function main() {
 
     console.log('\n--- Seeding wishlists ---');
     await seedWishlists(AppDataSource);
+
+    console.log('\n--- Seeding discounts ---');
+    await seedDiscounts(AppDataSource);
 
     console.log('\nSeed completed successfully.');
   } catch (err) {
