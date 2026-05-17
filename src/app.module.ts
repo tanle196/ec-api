@@ -18,6 +18,7 @@ import { CartsModule } from './carts/carts.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { WishlistsModule } from './wishlists/wishlists.module';
 import { DiscountsModule } from './discounts/discounts.module';
+import { MediaModule } from './media/media.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { DiscountsModule } from './discounts/discounts.module';
     ReviewsModule,
     WishlistsModule,
     DiscountsModule,
+    MediaModule,
   ],
   controllers: [AppController],
   providers: [

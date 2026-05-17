@@ -7,10 +7,15 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -76,6 +81,42 @@ export class CategoriesController {
   @ApiOkResponse({ type: CategoryResponseDto })
   update(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
     return this.categoriesService.update(id, dto);
+  }
+
+  @Post(':id/image/upload')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @ApiBearerAuth('access-token')
+  @Permissions('category.update')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({
+    summary: 'Upload and set category image (replaces existing)',
+  })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+      required: ['file'],
+    },
+  })
+  @ApiOkResponse({ type: CategoryResponseDto })
+  uploadImage(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<CategoryResponseDto> {
+    return this.categoriesService.uploadImage(id, file);
+  }
+
+  @Delete(':id/image')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @ApiBearerAuth('access-token')
+  @Permissions('category.update')
+  @ApiOperation({ summary: 'Remove category image (also deletes from cloud)' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiOkResponse({ type: CategoryResponseDto })
+  removeImage(@Param('id') id: string) {
+    return this.categoriesService.removeImage(id);
   }
 
   @Delete(':id')

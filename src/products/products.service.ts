@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -19,9 +20,12 @@ import { CreateTagDto } from './dto/create-tag.dto';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { ProductListItemDto } from './dto/product-response.dto';
 import { ProductStatus } from './enums/product-status.enum';
+import { MediaService } from '@/media/media.service';
 
 @Injectable()
 export class ProductsService {
+  private readonly logger = new Logger(ProductsService.name);
+
   constructor(
     @InjectRepository(Product)
     private readonly productRepo: Repository<Product>,
@@ -31,6 +35,7 @@ export class ProductsService {
     private readonly variantRepo: Repository<ProductVariant>,
     @InjectRepository(Tag)
     private readonly tagRepo: Repository<Tag>,
+    private readonly mediaService: MediaService,
   ) {}
 
   // ── Products ───────────────────────────────────────────────
@@ -171,6 +176,37 @@ export class ProductsService {
     );
   }
 
+  async uploadImage(
+    productId: string,
+    file: Express.Multer.File,
+    opts?: { alt?: string; isPrimary?: boolean; sortOrder?: number },
+  ): Promise<ProductImage> {
+    await this.findOne(productId);
+
+    const result = await this.mediaService.uploadOne(
+      file,
+      `products/${productId}`,
+    );
+
+    if (opts?.isPrimary) {
+      await this.imageRepo.update(
+        { product_id: productId },
+        { isPrimary: false },
+      );
+    }
+
+    return this.imageRepo.save(
+      this.imageRepo.create({
+        product_id: productId,
+        url: result.url,
+        publicId: result.publicId,
+        alt: opts?.alt ?? null,
+        isPrimary: opts?.isPrimary ?? false,
+        sortOrder: opts?.sortOrder ?? 0,
+      }),
+    );
+  }
+
   async removeImage(
     productId: string,
     imageId: string,
@@ -179,6 +215,17 @@ export class ProductsService {
       where: { id: imageId, product_id: productId },
     });
     if (!image) throw new NotFoundException('Image not found');
+
+    if (image.publicId) {
+      try {
+        await this.mediaService.delete(image.publicId);
+      } catch (err) {
+        this.logger.warn(
+          `Could not delete cloud asset ${image.publicId}: ${err}`,
+        );
+      }
+    }
+
     await this.imageRepo.remove(image);
     return { success: true };
   }

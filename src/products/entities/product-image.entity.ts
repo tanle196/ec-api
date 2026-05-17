@@ -23,6 +23,9 @@ export class ProductImage {
   url!: string;
 
   @Column({ type: 'varchar', nullable: true })
+  publicId!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
   alt!: string | null;
 
   @Column({ default: false })

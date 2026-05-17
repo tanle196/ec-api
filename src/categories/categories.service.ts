@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -14,12 +15,16 @@ import {
   CategoryResponseDto,
   CategoryTreeNodeDto,
 } from './dto/category-response.dto';
+import { MediaService } from '@/media/media.service';
 
 @Injectable()
 export class CategoriesService {
+  private readonly logger = new Logger(CategoriesService.name);
+
   constructor(
     @InjectRepository(Category)
     private readonly repo: Repository<Category>,
+    private readonly mediaService: MediaService,
   ) {}
 
   async create(dto: CreateCategoryDto): Promise<Category> {
@@ -128,6 +133,44 @@ export class CategoriesService {
     if (dto.sortOrder !== undefined) category.sortOrder = dto.sortOrder;
     if (dto.isActive !== undefined) category.isActive = dto.isActive;
 
+    return this.repo.save(category);
+  }
+
+  async uploadImage(id: string, file: Express.Multer.File): Promise<Category> {
+    const category = await this.findOne(id);
+
+    // Delete old cloud image before replacing
+    if (category.imagePublicId) {
+      try {
+        await this.mediaService.delete(category.imagePublicId);
+      } catch (err) {
+        this.logger.warn(
+          `Could not delete old cloud asset ${category.imagePublicId}: ${err}`,
+        );
+      }
+    }
+
+    const result = await this.mediaService.uploadOne(file, `categories/${id}`);
+    category.image = result.url;
+    category.imagePublicId = result.publicId;
+    return this.repo.save(category);
+  }
+
+  async removeImage(id: string): Promise<Category> {
+    const category = await this.findOne(id);
+
+    if (category.imagePublicId) {
+      try {
+        await this.mediaService.delete(category.imagePublicId);
+      } catch (err) {
+        this.logger.warn(
+          `Could not delete cloud asset ${category.imagePublicId}: ${err}`,
+        );
+      }
+    }
+
+    category.image = null;
+    category.imagePublicId = null;
     return this.repo.save(category);
   }
 

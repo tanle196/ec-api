@@ -7,10 +7,15 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -103,11 +108,48 @@ export class ProductsController {
     return this.productsService.addImage(id, dto);
   }
 
+  @Post(':id/images/upload')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @ApiBearerAuth('access-token')
+  @Permissions('product.update')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Upload and attach an image to a product' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+        alt: { type: 'string' },
+        isPrimary: { type: 'boolean' },
+        sortOrder: { type: 'integer' },
+      },
+      required: ['file'],
+    },
+  })
+  @ApiResponse({ status: 201, type: ProductImageResponseDto })
+  uploadImage(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('alt') alt?: string,
+    @Body('isPrimary') isPrimary?: string,
+    @Body('sortOrder') sortOrder?: string,
+  ): Promise<ProductImageResponseDto> {
+    return this.productsService.uploadImage(id, file, {
+      alt,
+      isPrimary: isPrimary === 'true',
+      sortOrder: sortOrder ? parseInt(sortOrder, 10) : 0,
+    });
+  }
+
   @Delete(':id/images/:imageId')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @ApiBearerAuth('access-token')
   @Permissions('product.update')
-  @ApiOperation({ summary: 'Remove image from product' })
+  @ApiOperation({
+    summary: 'Remove image from product (also deletes from cloud)',
+  })
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiParam({ name: 'imageId', example: 'uuid-v4' })
   @ApiOkResponse({ schema: { example: { success: true } } })

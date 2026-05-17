@@ -5,6 +5,7 @@ import { NodeEnv } from './environment';
 import { GoogleConfig } from './environment/google.config';
 import { JwtConfig } from './environment/jwt.config';
 import { MailConfig } from './environment/mail.config';
+import { MediaConfig } from './environment/media.config';
 import { ConfigModules, ConfigModulesType } from './types/ConfigModules';
 import { AppConfig } from './environment/app.config';
 
@@ -38,6 +39,10 @@ export class TypedConfigService {
 
   getMailConfig(): MailConfig {
     return this.getModuleConfig<MailConfig>(ConfigModules.Mail);
+  }
+
+  getMediaConfig(): MediaConfig {
+    return this.getModuleConfig<MediaConfig>(ConfigModules.Media);
   }
 
   getEnv(): NodeEnv {

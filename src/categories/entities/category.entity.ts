@@ -36,6 +36,9 @@ export class Category {
   @Column({ type: 'varchar', nullable: true })
   image!: string | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  imagePublicId!: string | null;
+
   @Column({ default: 0 })
   sortOrder!: number;
 

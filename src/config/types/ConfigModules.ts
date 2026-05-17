@@ -4,6 +4,7 @@ export const ConfigModules = {
   Jwt: 'jwt',
   Google: 'google',
   Mail: 'mail',
+  Media: 'media',
 } as const;
 
 export type ConfigModulesType =
