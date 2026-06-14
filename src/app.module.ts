@@ -19,6 +19,7 @@ import { ReviewsModule } from './reviews/reviews.module';
 import { WishlistsModule } from './wishlists/wishlists.module';
 import { DiscountsModule } from './discounts/discounts.module';
 import { MediaModule } from './media/media.module';
+import { BannersModule } from './banners/banners.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { MediaModule } from './media/media.module';
     WishlistsModule,
     DiscountsModule,
     MediaModule,
+    BannersModule,
   ],
   controllers: [AppController],
   providers: [

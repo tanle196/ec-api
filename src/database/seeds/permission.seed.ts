@@ -281,6 +281,32 @@ const PERMISSIONS: Pick<
     description: 'Xoá mã giảm giá',
     isSystem: true,
   },
+
+  // banners
+  {
+    module: 'banner',
+    action: PermissionAction.CREATE,
+    description: 'Tạo banner',
+    isSystem: true,
+  },
+  {
+    module: 'banner',
+    action: PermissionAction.READ,
+    description: 'Xem tất cả banner (admin)',
+    isSystem: true,
+  },
+  {
+    module: 'banner',
+    action: PermissionAction.UPDATE,
+    description: 'Cập nhật / sắp xếp banner',
+    isSystem: true,
+  },
+  {
+    module: 'banner',
+    action: PermissionAction.DELETE,
+    description: 'Xoá banner',
+    isSystem: true,
+  },
 ];
 
 export async function seedPermissions(
