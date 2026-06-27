@@ -9,6 +9,9 @@ export class UserResponseDto {
   })
   id!: string;
 
+  @ApiProperty({ example: 'USR-20260627-AB12CD' })
+  userCode!: string;
+
   @ApiProperty({
     example: 'user@gmail.com',
   })

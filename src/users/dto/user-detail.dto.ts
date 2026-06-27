@@ -6,6 +6,9 @@ export class UserDetailDto {
   @ApiProperty({ example: 'uuid-v4' })
   id!: string;
 
+  @ApiProperty({ example: 'USR-20260627-AB12CD' })
+  userCode!: string;
+
   @ApiProperty({ example: 'user@example.com' })
   email!: string;
 

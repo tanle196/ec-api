@@ -4,6 +4,7 @@ import { User } from '@/users/entities/user.entity';
 import { Identity } from '@/auth/entities/identity.entity';
 import { Role } from '@/roles/entities/role.entity';
 import { AuthProvider } from '@/auth/enums/AuthProvider';
+import { generateUserCode } from '@/users/utils/user-code.util';
 
 interface UserSeedData {
   email: string;
@@ -60,6 +61,7 @@ export async function seedUsers(
       user = userRepo.create({
         email: data.email,
         fullName: data.fullName,
+        userCode: generateUserCode(),
         roles: [role],
       });
       await userRepo.save(user);

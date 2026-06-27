@@ -17,6 +17,7 @@ import { User } from '@/users/entities/user.entity';
 import { TypedConfigService } from '@/config/TypedConfigService';
 import { MailService } from '@/mail/mail.service';
 import { UsersService } from '@/users/users.service';
+import { generateUserCode } from '@/users/utils/user-code.util';
 
 @Injectable()
 export class AuthService {
@@ -197,7 +198,9 @@ export class AuthService {
         .getOne();
 
       if (!newUser) {
-        newUser = manager.getRepository(User).create({ email });
+        newUser = manager
+          .getRepository(User)
+          .create({ email, userCode: generateUserCode() });
         newUser = await manager.getRepository(User).save(newUser);
       }
 
@@ -263,7 +266,9 @@ export class AuthService {
         const userRepo = manager.getRepository(User);
         const identityRepo = manager.getRepository(Identity);
 
-        const newUser = await userRepo.save(userRepo.create({ email }));
+        const newUser = await userRepo.save(
+          userRepo.create({ email, userCode: generateUserCode() }),
+        );
 
         await identityRepo.save(
           identityRepo.create({

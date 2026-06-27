@@ -64,6 +64,15 @@ export class UsersController {
     return profile;
   }
 
+  @Get('by-code/:userCode')
+  @Permissions('user.read')
+  @ApiOperation({ summary: 'Get user by userCode' })
+  @ApiParam({ name: 'userCode', example: 'USR-20260627-AB12CD' })
+  @ApiOkResponse({ type: UserDetailDto })
+  findByUserCode(@Param('userCode') userCode: string): Promise<UserDetailDto> {
+    return this.usersService.findByUserCode(userCode);
+  }
+
   @Get(':id')
   @Permissions('user.read')
   @ApiOperation({ summary: 'Get user by id with roles and permissions' })

@@ -6,6 +6,7 @@ export class UserMapper {
   static toResponse = (entity: User): UserResponseDto => {
     return {
       id: entity.id,
+      userCode: entity.userCode ?? '',
       email: entity.email,
       fullName: entity.fullName,
       roles: RoleMapper.toResponseList(entity.roles),

@@ -7,6 +7,9 @@ export class UserFilterDto {
 
   @ApiPropertyOptional()
   role?: string;
+
+  @ApiPropertyOptional({ example: 'USR-20260627-AB12CD' })
+  userCode?: string;
 }
 
 export class UserListQueryDto extends IntersectionType(

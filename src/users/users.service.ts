@@ -41,6 +41,27 @@ export class UsersService {
 
     return {
       id: user.id,
+      userCode: user.userCode ?? '',
+      email: user.email,
+      fullName: user.fullName,
+      avatar: user.avatar,
+      roles: user.roles ?? [],
+      permissions: user.permissions ?? [],
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  }
+
+  async findByUserCode(userCode: string): Promise<UserDetailDto> {
+    const user = await this.repo.findOne({
+      where: { userCode },
+      relations: ['roles', 'permissions'],
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    return {
+      id: user.id,
+      userCode: user.userCode ?? '',
       email: user.email,
       fullName: user.fullName,
       avatar: user.avatar,
@@ -131,21 +152,28 @@ export class UsersService {
   }
 
   async findAll(query: UserListQueryDto): Promise<UserPaginatedResponseDto> {
-    const { page = 1, limit = 20 } = query;
-    const [users, total] = await this.repo.findAndCount({
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        avatar: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-      relations: { roles: true },
-      order: { createdAt: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+    const { page = 1, limit = 20, email, userCode } = query;
+
+    const qb = this.repo
+      .createQueryBuilder('u')
+      .select([
+        'u.id',
+        'u.userCode',
+        'u.email',
+        'u.fullName',
+        'u.avatar',
+        'u.createdAt',
+        'u.updatedAt',
+      ])
+      .leftJoinAndSelect('u.roles', 'roles')
+      .orderBy('u.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (email) qb.andWhere('u.email ILIKE :email', { email: `%${email}%` });
+    if (userCode) qb.andWhere('u.userCode = :userCode', { userCode });
+
+    const [users, total] = await qb.getManyAndCount();
 
     return {
       data: users.map(UserMapper.toResponse),

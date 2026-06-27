@@ -21,6 +21,9 @@ export class User {
   @Column({ unique: true })
   email!: string;
 
+  @Column({ type: 'varchar', unique: true, nullable: true })
+  userCode!: string | null;
+
   @Column({ nullable: true })
   fullName!: string;
 
