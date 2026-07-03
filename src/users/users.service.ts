@@ -144,6 +144,7 @@ export class UsersService {
     );
 
     return {
+      id: user.id,
       name: user.fullName,
       email: user.email,
       roles: roleNames,
