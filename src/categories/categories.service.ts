@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, IsNull, Repository } from 'typeorm';
+import { ILike, IsNull, Not, Repository } from 'typeorm';
 import { Category } from './entities/category.entity';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
@@ -16,6 +16,7 @@ import {
   CategoryTreeNodeDto,
 } from './dto/category-response.dto';
 import { MediaService } from '@/media/media.service';
+import { generateUniqueSlug } from '@/common/utils/slug.util';
 
 @Injectable()
 export class CategoriesService {
@@ -28,11 +29,19 @@ export class CategoriesService {
   ) {}
 
   async create(dto: CreateCategoryDto): Promise<Category> {
-    const slug = dto.slug ?? this.toSlug(dto.name);
-
-    const existing = await this.repo.findOne({ where: { slug } });
-    if (existing) {
-      throw new ConflictException(`Slug '${slug}' already exists`);
+    let slug: string;
+    if (dto.slug) {
+      const existing = await this.repo.findOne({ where: { slug: dto.slug } });
+      if (existing) {
+        throw new ConflictException(`Slug '${dto.slug}' already exists`);
+      }
+      slug = dto.slug;
+    } else {
+      slug = await generateUniqueSlug(
+        dto.name,
+        (s) => this.repo.exists({ where: { slug: s } }),
+        'category',
+      );
     }
 
     if (dto.parent_id) {
@@ -125,7 +134,12 @@ export class CategoriesService {
 
     if (dto.name !== undefined) category.name = dto.name;
     if (dto.slug !== undefined) category.slug = dto.slug;
-    else if (dto.name !== undefined) category.slug = this.toSlug(dto.name);
+    else if (dto.name !== undefined)
+      category.slug = await generateUniqueSlug(
+        dto.name,
+        (s) => this.repo.exists({ where: { slug: s, id: Not(id) } }),
+        'category',
+      );
     if (dto.parent_id !== undefined) category.parent_id = dto.parent_id ?? null;
     if (dto.description !== undefined)
       category.description = dto.description ?? null;
@@ -198,16 +212,5 @@ export class CategoriesService {
       ...category,
       children: await Promise.all(children.map((c) => this.buildTreeNode(c))),
     };
-  }
-
-  private toSlug(name: string): string {
-    return name
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/đ/g, 'd')
-      .replace(/[^a-z0-9\s-]/g, '')
-      .trim()
-      .replace(/\s+/g, '-');
   }
 }

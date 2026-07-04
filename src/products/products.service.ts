@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { Product } from './entities/product.entity';
 import { ProductImage } from './entities/product-image.entity';
 import { ProductVariant } from './entities/product-variant.entity';
@@ -21,6 +21,7 @@ import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { ProductListItemDto } from './dto/product-response.dto';
 import { ProductStatus } from './enums/product-status.enum';
 import { MediaService } from '@/media/media.service';
+import { generateUniqueSlug } from '@/common/utils/slug.util';
 
 @Injectable()
 export class ProductsService {
@@ -41,8 +42,17 @@ export class ProductsService {
   // ── Products ───────────────────────────────────────────────
 
   async create(dto: CreateProductDto): Promise<Product> {
-    const slug = dto.slug ?? this.toSlug(dto.name);
-    await this.assertSlugUnique(slug);
+    let slug: string;
+    if (dto.slug) {
+      await this.assertSlugUnique(dto.slug);
+      slug = dto.slug;
+    } else {
+      slug = await generateUniqueSlug(
+        dto.name,
+        (s) => this.productRepo.exists({ where: { slug: s } }),
+        'product',
+      );
+    }
     await this.assertSkuUnique(dto.sku);
 
     if (dto.variants?.length) {
@@ -136,7 +146,12 @@ export class ProductsService {
 
     if (dto.name !== undefined) {
       product.name = dto.name;
-      if (!dto.slug) product.slug = this.toSlug(dto.name);
+      if (!dto.slug)
+        product.slug = await generateUniqueSlug(
+          dto.name,
+          (s) => this.productRepo.exists({ where: { slug: s, id: Not(id) } }),
+          'product',
+        );
     }
     if (dto.slug !== undefined) product.slug = dto.slug;
     if (dto.category_id !== undefined) product.category_id = dto.category_id;
@@ -281,13 +296,25 @@ export class ProductsService {
   // ── Tags ──────────────────────────────────────────────────
 
   async createTag(dto: CreateTagDto): Promise<Tag> {
-    const slug = dto.slug ?? this.toSlug(dto.name);
-
-    const existing = await this.tagRepo.findOne({
-      where: [{ name: dto.name }, { slug }],
+    const existingName = await this.tagRepo.findOne({
+      where: { name: dto.name },
     });
-    if (existing)
-      throw new ConflictException('Tag name or slug already exists');
+    if (existingName) throw new ConflictException('Tag name already exists');
+
+    let slug: string;
+    if (dto.slug) {
+      const existingSlug = await this.tagRepo.findOne({
+        where: { slug: dto.slug },
+      });
+      if (existingSlug) throw new ConflictException('Tag slug already exists');
+      slug = dto.slug;
+    } else {
+      slug = await generateUniqueSlug(
+        dto.name,
+        (s) => this.tagRepo.exists({ where: { slug: s } }),
+        'tag',
+      );
+    }
 
     return this.tagRepo.save(this.tagRepo.create({ name: dto.name, slug }));
   }
@@ -328,16 +355,5 @@ export class ProductsService {
     const exists = await this.variantRepo.findOne({ where: { sku } });
     if (exists)
       throw new ConflictException(`Variant SKU '${sku}' already exists`);
-  }
-
-  private toSlug(name: string): string {
-    return name
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/đ/g, 'd')
-      .replace(/[^a-z0-9\s-]/g, '')
-      .trim()
-      .replace(/\s+/g, '-');
   }
 }
