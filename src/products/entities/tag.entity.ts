@@ -1,10 +1,8 @@
-import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity } from 'typeorm';
+import { AbstractIdEntity } from '@/common/entities/base.entity';
 
 @Entity('tags')
-export class Tag {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Tag extends AbstractIdEntity {
   @Column({ unique: true })
   name!: string;
 

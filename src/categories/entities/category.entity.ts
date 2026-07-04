@@ -1,19 +1,8 @@
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  OneToMany,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, OneToMany } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 
 @Entity('categories')
-export class Category {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Category extends AbstractBaseEntity {
   @Column({ nullable: true, type: 'uuid' })
   parent_id!: string | null;
 
@@ -44,10 +33,4 @@ export class Category {
 
   @Column({ default: true })
   isActive!: boolean;
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 }

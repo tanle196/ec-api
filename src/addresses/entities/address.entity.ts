@@ -1,19 +1,9 @@
 import { User } from '@/users/entities/user.entity';
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 
 @Entity('addresses')
-export class Address {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Address extends AbstractBaseEntity {
   @Column({ type: 'uuid' })
   user_id!: string;
 
@@ -47,10 +37,4 @@ export class Address {
 
   @Column({ default: false })
   isDefault!: boolean;
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 }

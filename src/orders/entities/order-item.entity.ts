@@ -1,18 +1,10 @@
 import { ProductVariant } from '@/products/entities/product-variant.entity';
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { AbstractIdEntity } from '@/common/entities/base.entity';
 import { Order } from './order.entity';
 
 @Entity('order_items')
-export class OrderItem {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class OrderItem extends AbstractIdEntity {
   @Column({ type: 'uuid' })
   order_id!: string;
 

@@ -1,19 +1,10 @@
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  ManyToMany,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity, ManyToMany } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import type { Order } from '@/orders/entities/order.entity';
 import { DiscountType } from '../enums/discount-type.enum';
 
 @Entity('discounts')
-export class Discount {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Discount extends AbstractBaseEntity {
   @Column({ unique: true })
   code!: string;
 
@@ -40,12 +31,6 @@ export class Discount {
 
   @Column({ type: 'timestamp', nullable: true })
   expiresAt!: Date | null;
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 
   @ManyToMany('Order', 'discounts', { eager: false })
   orders!: Order[];

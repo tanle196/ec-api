@@ -3,24 +3,19 @@ import { Discount } from '@/discounts/entities/discount.entity';
 import { User } from '@/users/entities/user.entity';
 import {
   Column,
-  CreateDateColumn,
   Entity,
   JoinColumn,
   JoinTable,
   ManyToMany,
   ManyToOne,
   OneToMany,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
 } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import { OrderStatus } from '../enums/order-status.enum';
 import { OrderItem } from './order-item.entity';
 
 @Entity('orders')
-export class Order {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Order extends AbstractBaseEntity {
   @Column({ type: 'uuid' })
   user_id!: string;
 
@@ -73,10 +68,4 @@ export class Order {
     inverseJoinColumn: { name: 'discount_id' },
   })
   discounts!: Discount[];
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 }

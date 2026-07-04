@@ -1,21 +1,11 @@
 import { User } from '@/users/entities/user.entity';
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-  Unique,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity, ManyToOne, Unique } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import { AuthProvider } from '../enums/AuthProvider';
 
 @Entity('identities')
 @Unique(['provider', 'providerUserId'])
-export class Identity {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Identity extends AbstractBaseEntity {
   @Column({ nullable: true })
   providerUserId!: string;
 
@@ -51,12 +41,6 @@ export class Identity {
 
   @Column({ type: 'jsonb', nullable: true })
   rawProfile: any;
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 
   @ManyToOne(() => User, (user) => user.identities, {
     onDelete: 'CASCADE',

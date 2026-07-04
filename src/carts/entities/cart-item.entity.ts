@@ -1,20 +1,10 @@
 import { ProductVariant } from '@/products/entities/product-variant.entity';
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import { Cart } from './cart.entity';
 
 @Entity('cart_items')
-export class CartItem {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class CartItem extends AbstractBaseEntity {
   @Column({ type: 'uuid' })
   cart_id!: string;
 
@@ -31,10 +21,4 @@ export class CartItem {
 
   @Column({ type: 'int', default: 1 })
   quantity!: number;
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 }

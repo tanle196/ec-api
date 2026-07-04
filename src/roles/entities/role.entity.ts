@@ -1,31 +1,15 @@
 import { Permission } from '@/permissions/entities/permission.entity';
 import { User } from '@/users/entities/user.entity';
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  JoinTable,
-  ManyToMany,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity, JoinTable, ManyToMany } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 
 @Entity('roles')
-export class Role {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Role extends AbstractBaseEntity {
   @Column({ unique: true })
   name!: string;
 
   @Column({ nullable: true })
   description!: string;
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 
   @ManyToMany(() => User, (user) => user.roles)
   users!: User[];

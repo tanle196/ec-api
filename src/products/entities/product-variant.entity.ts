@@ -1,19 +1,9 @@
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import { Product } from './product.entity';
 
 @Entity('product_variants')
-export class ProductVariant {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class ProductVariant extends AbstractBaseEntity {
   @Column({ type: 'uuid' })
   product_id!: string;
 
@@ -27,7 +17,15 @@ export class ProductVariant {
   @Column({ unique: true })
   sku!: string;
 
-  @Column({ type: 'decimal', precision: 12, scale: 2 })
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    transformer: {
+      to: (v: number) => v,
+      from: (v: string) => parseFloat(v),
+    },
+  })
   price!: number;
 
   @Column({ default: 0 })
@@ -38,10 +36,4 @@ export class ProductVariant {
 
   @Column({ default: true })
   isActive!: boolean;
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 }

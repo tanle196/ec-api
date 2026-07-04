@@ -1,21 +1,11 @@
 import { Order } from '@/orders/entities/order.entity';
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import { PaymentMethod } from '../enums/payment-method.enum';
 import { PaymentStatus } from '../enums/payment-status.enum';
 
 @Entity('payments')
-export class Payment {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Payment extends AbstractBaseEntity {
   @Column({ type: 'uuid' })
   order_id!: string;
 
@@ -44,10 +34,4 @@ export class Payment {
 
   @Column({ type: 'timestamp', nullable: true })
   paidAt!: Date | null;
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 }

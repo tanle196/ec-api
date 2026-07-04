@@ -1,15 +1,13 @@
 import {
   Column,
-  CreateDateColumn,
   Entity,
   JoinColumn,
   JoinTable,
   ManyToMany,
   ManyToOne,
   OneToMany,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
 } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import { Category } from '@/categories/entities/category.entity';
 import { ProductStatus } from '../enums/product-status.enum';
 import { ProductImage } from './product-image.entity';
@@ -17,10 +15,7 @@ import { ProductVariant } from './product-variant.entity';
 import { Tag } from './tag.entity';
 
 @Entity('products')
-export class Product {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Product extends AbstractBaseEntity {
   @Column({ type: 'uuid' })
   category_id!: string;
 
@@ -62,10 +57,4 @@ export class Product {
     inverseJoinColumn: { name: 'tag_id', referencedColumnName: 'id' },
   })
   tags!: Tag[];
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 }

@@ -1,17 +1,9 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { AbstractIdEntity } from '@/common/entities/base.entity';
 import { Product } from './product.entity';
 
 @Entity('product_images')
-export class ProductImage {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class ProductImage extends AbstractIdEntity {
   @Column({ type: 'uuid' })
   product_id!: string;
 

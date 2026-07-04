@@ -1,18 +1,10 @@
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import { BannerLinkType } from '../enums/banner-link-type.enum';
 import { BannerPosition } from '../enums/banner-position.enum';
 
 @Entity('banners')
-export class Banner {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Banner extends AbstractBaseEntity {
   @Column()
   title!: string;
 
@@ -58,10 +50,4 @@ export class Banner {
 
   @Column({ type: 'int', default: 0 })
   clickCount!: number;
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 }

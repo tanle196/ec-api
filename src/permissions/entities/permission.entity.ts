@@ -2,27 +2,13 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '@/roles/entities/role.entity';
 import { User } from '@/users/entities/user.entity';
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  Index,
-  ManyToMany,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity, Index, ManyToMany } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import { PermissionAction } from '../enums/permission-action.enum';
 
 @Entity('permissions')
 @Index(['module', 'action'], { unique: true })
-export class Permission {
-  @ApiProperty({
-    example: 'uuid-v4',
-    description: 'ID permission',
-  })
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Permission extends AbstractBaseEntity {
   @ApiProperty({
     example: 'user',
     description: 'Module',
@@ -55,18 +41,6 @@ export class Permission {
   })
   @Column({ default: false })
   isSystem!: boolean;
-
-  @ApiProperty({
-    example: '2026-01-01T10:00:00Z',
-  })
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @ApiProperty({
-    example: '2026-01-01T10:05:00Z',
-  })
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 
   @ManyToMany(() => Role, (role) => role.permissions)
   roles!: Role[];

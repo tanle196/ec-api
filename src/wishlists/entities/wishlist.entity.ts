@@ -1,21 +1,11 @@
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-  Unique,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Unique } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import { User } from '@/users/entities/user.entity';
 import { Product } from '@/products/entities/product.entity';
 
 @Entity('wishlists')
 @Unique(['user_id', 'product_id'])
-export class Wishlist {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Wishlist extends AbstractBaseEntity {
   @Column({ type: 'uuid' })
   user_id!: string;
 
@@ -29,7 +19,4 @@ export class Wishlist {
   @ManyToOne(() => Product, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'product_id' })
   product!: Product;
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
 }

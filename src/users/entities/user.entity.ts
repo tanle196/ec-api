@@ -2,22 +2,11 @@ import { Identity } from '@/auth/entities/identity.entity';
 import { Address } from '@/addresses/entities/address.entity';
 import { Permission } from '@/permissions/entities/permission.entity';
 import { Role } from '@/roles/entities/role.entity';
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  JoinTable,
-  ManyToMany,
-  OneToMany,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity, JoinTable, ManyToMany, OneToMany } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 
 @Entity('users')
-export class User {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class User extends AbstractBaseEntity {
   @Column({ unique: true })
   email!: string;
 
@@ -29,12 +18,6 @@ export class User {
 
   @Column({ nullable: true })
   avatar!: string;
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 
   @OneToMany(() => Identity, (identity) => identity.user)
   identities!: Identity[];

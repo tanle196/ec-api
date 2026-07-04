@@ -1,22 +1,11 @@
 import { Product } from '@/products/entities/product.entity';
 import { User } from '@/users/entities/user.entity';
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-  Unique,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Unique } from 'typeorm';
+import { AbstractBaseEntity } from '@/common/entities/base.entity';
 
 @Entity('reviews')
 @Unique(['user_id', 'product_id'])
-export class Review {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Review extends AbstractBaseEntity {
   @Column({ type: 'uuid' })
   user_id!: string;
 
@@ -45,10 +34,4 @@ export class Review {
 
   @Column({ default: false })
   isApproved!: boolean;
-
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt!: Date;
-
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt!: Date;
 }
