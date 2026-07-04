@@ -28,11 +28,11 @@ import { PermissionMetaResponseDto } from './dto/permission-meta-response.dto';
 import { Permissions } from './decorators/permissions.decorator';
 import { PermissionsGuard } from './guards/permissions.guard';
 
-@ApiTags('permissions')
-@Controller('permissions')
+@ApiTags('Admin: permissions')
+@Controller('admin/permissions')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @ApiBearerAuth('access-token')
-export class PermissionsController {
+export class AdminPermissionsController {
   constructor(private readonly service: PermissionsService) {}
 
   @Post()

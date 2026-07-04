@@ -35,10 +35,29 @@ async function bootstrap() {
     .addBearerAuth()
     .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document);
-  SwaggerModule.setup('docs', app, document, {
+  const fullDocument = SwaggerModule.createDocument(app, config);
+
+  const splitDocument = (admin: boolean) => ({
+    ...fullDocument,
+    info: {
+      ...fullDocument.info,
+      title: admin ? 'EC API — Admin' : 'EC API — Public',
+      description: admin
+        ? 'Admin management endpoints'
+        : 'Public storefront & user-facing endpoints',
+    },
+    paths: Object.fromEntries(
+      Object.entries(fullDocument.paths).filter(([p]) =>
+        admin ? p.startsWith('/admin') : !p.startsWith('/admin'),
+      ),
+    ),
+  });
+
+  SwaggerModule.setup('docs', app, splitDocument(false), {
     jsonDocumentUrl: 'docs-json',
+  });
+  SwaggerModule.setup('docs/admin', app, splitDocument(true), {
+    jsonDocumentUrl: 'docs/admin-json',
   });
 
   await app.listen(process.env.PORT ?? 3000);

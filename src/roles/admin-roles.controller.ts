@@ -32,11 +32,11 @@ import {
 import { AssignPermissionsDto } from './dto/assign-permissions.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 
-@ApiTags('roles')
-@Controller('roles')
+@ApiTags('Admin: roles')
+@Controller('admin/roles')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @ApiBearerAuth('access-token')
-export class RolesController {
+export class AdminRolesController {
   constructor(private readonly rolesService: RolesService) {}
 
   @Post()

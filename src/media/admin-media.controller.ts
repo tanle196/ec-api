@@ -28,14 +28,14 @@ import {
   UploadResultDto,
 } from './dto/media-response.dto';
 
-@ApiTags('media')
-@Controller('media')
-export class MediaController {
+@ApiTags('Admin: media')
+@Controller('admin/media')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@ApiBearerAuth('access-token')
+export class AdminMediaController {
   constructor(private readonly mediaService: MediaService) {}
 
   @Post('upload')
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @ApiBearerAuth('access-token')
   @Permissions('media.upload')
   @UseInterceptors(FileInterceptor('file'))
   @ApiOperation({ summary: 'Upload a single image' })
@@ -57,8 +57,6 @@ export class MediaController {
   }
 
   @Post('upload/multiple')
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @ApiBearerAuth('access-token')
   @Permissions('media.upload')
   @UseInterceptors(FilesInterceptor('files', 10))
   @ApiOperation({ summary: 'Upload multiple images (max 10)' })
@@ -84,8 +82,6 @@ export class MediaController {
   }
 
   @Delete('*publicId')
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @ApiBearerAuth('access-token')
   @Permissions('media.delete')
   @ApiOperation({ summary: 'Delete an image by publicId' })
   @ApiParam({

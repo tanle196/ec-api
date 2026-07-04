@@ -19,11 +19,8 @@ import {
 import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import type { CurrentUser as ICurrentUser } from '@/common/interfaces/current-user.interface';
-import { Permissions } from '@/permissions/decorators/permissions.decorator';
-import { PermissionsGuard } from '@/permissions/guards/permissions.guard';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
-import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import {
   OrderPaginatedResponseDto,
   OrderResponseDto,
@@ -36,8 +33,6 @@ import { OrdersService } from './orders.service';
 @ApiBearerAuth('access-token')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
-
-  // ── User endpoints ────────────────────────────────────────
 
   @Post()
   @ApiOperation({ summary: 'Create a new order' })
@@ -79,41 +74,5 @@ export class OrdersController {
     @Param('id') id: string,
   ): Promise<OrderResponseDto> {
     return this.ordersService.cancel(id, user.id!);
-  }
-
-  // ── Admin endpoints ───────────────────────────────────────
-
-  @Get()
-  @UseGuards(PermissionsGuard)
-  @Permissions('order.read')
-  @ApiOperation({ summary: 'Admin: list all orders' })
-  @ApiOkResponse({ type: OrderPaginatedResponseDto })
-  findAll(
-    @Query() query: OrderListQueryDto,
-  ): Promise<OrderPaginatedResponseDto> {
-    return this.ordersService.findAll(query, undefined, true);
-  }
-
-  @Get(':id')
-  @UseGuards(PermissionsGuard)
-  @Permissions('order.read')
-  @ApiOperation({ summary: 'Admin: get order detail' })
-  @ApiParam({ name: 'id', example: 'uuid-v4' })
-  @ApiOkResponse({ type: OrderResponseDto })
-  findOne(@Param('id') id: string): Promise<OrderResponseDto> {
-    return this.ordersService.findOne(id);
-  }
-
-  @Patch(':id/status')
-  @UseGuards(PermissionsGuard)
-  @Permissions('order.update')
-  @ApiOperation({ summary: 'Admin: update order status' })
-  @ApiParam({ name: 'id', example: 'uuid-v4' })
-  @ApiOkResponse({ type: OrderResponseDto })
-  updateStatus(
-    @Param('id') id: string,
-    @Body() dto: UpdateOrderStatusDto,
-  ): Promise<OrderResponseDto> {
-    return this.ordersService.updateStatus(id, dto);
   }
 }

@@ -7,6 +7,7 @@ import { DiscountsModule } from '@/discounts/discounts.module';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrdersController } from './orders.controller';
+import { AdminOrdersController } from './admin-orders.controller';
 import { OrdersService } from './orders.service';
 
 @Module({
@@ -20,7 +21,7 @@ import { OrdersService } from './orders.service';
     ]),
     DiscountsModule,
   ],
-  controllers: [OrdersController],
+  controllers: [OrdersController, AdminOrdersController],
   providers: [OrdersService],
   exports: [OrdersService],
 })
