@@ -124,6 +124,7 @@ export class ProductsController {
         alt: { type: 'string' },
         isPrimary: { type: 'boolean' },
         sortOrder: { type: 'integer' },
+        variant_id: { type: 'string' },
       },
       required: ['file'],
     },
@@ -135,11 +136,13 @@ export class ProductsController {
     @Body('alt') alt?: string,
     @Body('isPrimary') isPrimary?: string,
     @Body('sortOrder') sortOrder?: string,
+    @Body('variant_id') variant_id?: string,
   ): Promise<ProductImageResponseDto> {
     return this.productsService.uploadImage(id, file, {
       alt,
       isPrimary: isPrimary === 'true',
       sortOrder: sortOrder ? parseInt(sortOrder, 10) : 0,
+      variant_id,
     });
   }
 

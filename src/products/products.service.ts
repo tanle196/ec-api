@@ -179,7 +179,12 @@ export class ProductsService {
   async uploadImage(
     productId: string,
     file: Express.Multer.File,
-    opts?: { alt?: string; isPrimary?: boolean; sortOrder?: number },
+    opts?: {
+      alt?: string;
+      isPrimary?: boolean;
+      sortOrder?: number;
+      variant_id?: string;
+    },
   ): Promise<ProductImage> {
     await this.findOne(productId);
 
@@ -198,6 +203,7 @@ export class ProductsService {
     return this.imageRepo.save(
       this.imageRepo.create({
         product_id: productId,
+        variant_id: opts?.variant_id ?? null,
         url: result.url,
         publicId: result.publicId,
         alt: opts?.alt ?? null,

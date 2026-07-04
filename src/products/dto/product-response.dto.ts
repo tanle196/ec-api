@@ -4,6 +4,7 @@ import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 
 export class ProductImageResponseDto {
   @ApiProperty() id!: string;
+  @ApiPropertyOptional({ nullable: true }) variant_id!: string | null;
   @ApiProperty() url!: string;
   @ApiPropertyOptional({ nullable: true }) alt!: string | null;
   @ApiProperty() isPrimary!: boolean;

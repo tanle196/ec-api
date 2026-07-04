@@ -5,6 +5,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
 } from 'class-validator';
 
@@ -13,6 +14,11 @@ export class CreateProductImageDto {
   @IsString()
   @IsNotEmpty()
   url!: string;
+
+  @ApiPropertyOptional({ example: 'uuid-v4' })
+  @IsUUID()
+  @IsOptional()
+  variant_id?: string;
 
   @ApiPropertyOptional({ example: 'Product front view' })
   @IsString()
