@@ -2,9 +2,11 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   Param,
   Patch,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -26,6 +28,11 @@ import { PermissionsGuard } from '@/permissions/guards/permissions.guard';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { CategoryListQueryDto } from './dto/category-list-query.dto';
+import {
+  CategoryPaginatedResponseDto,
+  CategoryTreeNodeDto,
+} from './dto/category-response.dto';
 import { AdminCategoryResponseDto } from './dto/admin-category-response.dto';
 
 @ApiTags('Admin: categories')
@@ -34,6 +41,31 @@ import { AdminCategoryResponseDto } from './dto/admin-category-response.dto';
 @ApiBearerAuth('access-token')
 export class AdminCategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
+
+  @Get()
+  @Permissions('category.read')
+  @ApiOperation({ summary: 'List categories (paginated)' })
+  @ApiOkResponse({ type: CategoryPaginatedResponseDto })
+  findAll(@Query() query: CategoryListQueryDto) {
+    return this.categoriesService.findAll(query);
+  }
+
+  @Get('tree')
+  @Permissions('category.read')
+  @ApiOperation({ summary: 'Get full category tree (recursive)' })
+  @ApiOkResponse({ type: [CategoryTreeNodeDto] })
+  findTree(): Promise<CategoryTreeNodeDto[]> {
+    return this.categoriesService.findTree();
+  }
+
+  @Get(':id')
+  @Permissions('category.read')
+  @ApiOperation({ summary: 'Get category by ID' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiOkResponse({ type: AdminCategoryResponseDto })
+  findOne(@Param('id') id: string): Promise<AdminCategoryResponseDto> {
+    return this.categoriesService.findOne(id);
+  }
 
   @Post()
   @Permissions('category.create')

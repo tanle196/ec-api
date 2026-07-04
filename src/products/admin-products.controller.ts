@@ -2,9 +2,11 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   Param,
   Patch,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -26,12 +28,14 @@ import { PermissionsGuard } from '@/permissions/guards/permissions.guard';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { ProductListQueryDto } from './dto/product-list-query.dto';
 import { CreateProductImageDto } from './dto/create-product-image.dto';
 import { CreateProductVariantDto } from './dto/create-product-variant.dto';
 import { UpdateProductVariantDto } from './dto/update-product-variant.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
 import {
   ProductImageResponseDto,
+  ProductPaginatedResponseDto,
   ProductVariantResponseDto,
 } from './dto/product-response.dto';
 import {
@@ -47,6 +51,23 @@ export class AdminProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   // ── Products ───────────────────────────────────────────────
+
+  @Get()
+  @Permissions('product.read')
+  @ApiOperation({ summary: 'List products (paginated, filterable)' })
+  @ApiOkResponse({ type: ProductPaginatedResponseDto })
+  findAll(@Query() query: ProductListQueryDto) {
+    return this.productsService.findAll(query);
+  }
+
+  @Get(':id')
+  @Permissions('product.read')
+  @ApiOperation({ summary: 'Get product detail with images, variants, tags' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiOkResponse({ type: AdminProductResponseDto })
+  findOne(@Param('id') id: string): Promise<AdminProductResponseDto> {
+    return this.productsService.findOne(id);
+  }
 
   @Post()
   @Permissions('product.create')

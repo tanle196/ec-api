@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -18,6 +19,8 @@ import { TypedConfigService } from '@/config/TypedConfigService';
 import { MailService } from '@/mail/mail.service';
 import { UsersService } from '@/users/users.service';
 import { generateUserCode } from '@/users/utils/user-code.util';
+
+const ADMIN_ROLES = ['super-admin', 'admin'];
 
 @Injectable()
 export class AuthService {
@@ -86,6 +89,29 @@ export class AuthService {
     );
 
     return { accessToken, refreshToken };
+  }
+
+  async adminLogin({
+    id,
+  }: {
+    id: string;
+  }): Promise<{ accessToken: string; refreshToken: string }> {
+    const userProfile = await this.userService.getUserProfile(id);
+    if (!userProfile?.roles.some((role) => ADMIN_ROLES.includes(role))) {
+      throw new ForbiddenException(
+        'Tài khoản không có quyền truy cập trang quản trị',
+      );
+    }
+
+    return this.generateTokens({ id });
+  }
+
+  assertAdminRole(roles: string[]): void {
+    if (!roles.some((role) => ADMIN_ROLES.includes(role))) {
+      throw new ForbiddenException(
+        'Tài khoản không có quyền truy cập trang quản trị',
+      );
+    }
   }
 
   async rotateRefreshToken(

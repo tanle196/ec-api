@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from '@/users/users.module';
+import { AdminAuthController } from './admin-auth.controller';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { Identity } from './entities/identity.entity';
@@ -14,7 +15,7 @@ import { MailModule } from '../mail/mail.module';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 
 @Module({
-  controllers: [AuthController],
+  controllers: [AuthController, AdminAuthController],
   imports: [
     TypeOrmModule.forFeature([Identity]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
