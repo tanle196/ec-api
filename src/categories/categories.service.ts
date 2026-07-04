@@ -97,6 +97,17 @@ export class CategoriesService {
     return category;
   }
 
+  async findBySlug(slug: string): Promise<Category> {
+    const category = await this.repo.findOne({
+      where: { slug },
+      relations: ['parent', 'children'],
+    });
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+    return category;
+  }
+
   async findTree(): Promise<CategoryTreeNodeDto[]> {
     const roots = await this.repo.find({
       where: { parent_id: IsNull() },

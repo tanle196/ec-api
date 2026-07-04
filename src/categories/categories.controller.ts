@@ -64,6 +64,14 @@ export class CategoriesController {
     return this.categoriesService.findTree();
   }
 
+  @Get('slug/:slug')
+  @ApiOperation({ summary: 'Get category by slug' })
+  @ApiParam({ name: 'slug', example: 'smartphones' })
+  @ApiOkResponse({ type: CategoryResponseDto })
+  findBySlug(@Param('slug') slug: string) {
+    return this.categoriesService.findBySlug(slug);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get category by ID' })
   @ApiParam({ name: 'id', example: 'uuid-v4' })

@@ -134,6 +134,15 @@ export class ProductsService {
     return product;
   }
 
+  async findBySlug(slug: string): Promise<Product> {
+    const product = await this.productRepo.findOne({
+      where: { slug },
+      relations: ['images', 'variants', 'tags', 'category'],
+    });
+    if (!product) throw new NotFoundException('Product not found');
+    return product;
+  }
+
   async update(id: string, dto: UpdateProductDto): Promise<Product> {
     const product = await this.findOne(id);
 
@@ -321,6 +330,12 @@ export class ProductsService {
 
   async findAllTags(): Promise<Tag[]> {
     return this.tagRepo.find({ order: { name: 'ASC' } });
+  }
+
+  async findTagBySlug(slug: string): Promise<Tag> {
+    const tag = await this.tagRepo.findOne({ where: { slug } });
+    if (!tag) throw new NotFoundException('Tag not found');
+    return tag;
   }
 
   async removeTag(tagId: string): Promise<{ success: boolean }> {

@@ -14,3 +14,4 @@
 - Run relevant tests before committing.
 - Do not modify unrelated files.
 - Keep commits focused and small.
+- Run lint after completing each task.
