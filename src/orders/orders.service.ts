@@ -20,7 +20,9 @@ import { OrderListQueryDto } from './dto/order-list-query.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
+import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderStatus } from './enums/order-status.enum';
+import { OrderStatusChangeActor } from './enums/order-status-change-actor.enum';
 
 interface ResolvedOrderItem {
   variant_id: string;
@@ -53,12 +55,12 @@ export class OrdersService {
   constructor(
     @InjectRepository(Order)
     private readonly orderRepo: Repository<Order>,
-    @InjectRepository(OrderItem)
-    private readonly itemRepo: Repository<OrderItem>,
     @InjectRepository(Address)
     private readonly addressRepo: Repository<Address>,
     @InjectRepository(ProductVariant)
     private readonly variantRepo: Repository<ProductVariant>,
+    @InjectRepository(OrderStatusHistory)
+    private readonly statusHistoryRepo: Repository<OrderStatusHistory>,
     private readonly dataSource: DataSource,
     private readonly discountsService: DiscountsService,
     private readonly configService: TypedConfigService,
@@ -264,6 +266,14 @@ export class OrdersService {
       await manager.delete(CartItem, { cart_id: params.cartId });
     }
 
+    await this.recordStatusChange(manager, {
+      orderId: savedOrder.id,
+      fromStatus: null,
+      toStatus: OrderStatus.PENDING,
+      actorType: OrderStatusChangeActor.CUSTOMER,
+      actorId: params.userId,
+    });
+
     return this.findOne(savedOrder.id);
   }
 
@@ -314,12 +324,30 @@ export class OrdersService {
       );
     }
 
-    await this.restoreStock(order);
-    order.status = OrderStatus.CANCELLED;
-    return this.orderRepo.save(order);
+    return this.dataSource.transaction(async (manager) => {
+      await this.restoreStock(order, manager);
+
+      const fromStatus = order.status;
+      order.status = OrderStatus.CANCELLED;
+      await manager.save(Order, order);
+
+      await this.recordStatusChange(manager, {
+        orderId: order.id,
+        fromStatus,
+        toStatus: OrderStatus.CANCELLED,
+        actorType: OrderStatusChangeActor.CUSTOMER,
+        actorId: userId,
+      });
+
+      return this.findOne(order.id);
+    });
   }
 
-  async updateStatus(id: string, dto: UpdateOrderStatusDto): Promise<Order> {
+  async updateStatus(
+    id: string,
+    dto: UpdateOrderStatusDto,
+    actor: { actorType: OrderStatusChangeActor; actorId?: string },
+  ): Promise<Order> {
     const order = await this.findOne(id);
 
     const allowedNext = ALLOWED_TRANSITIONS[order.status];
@@ -329,22 +357,112 @@ export class OrdersService {
       );
     }
 
-    if (dto.status === OrderStatus.CANCELLED) {
-      await this.restoreStock(order);
-    }
+    return this.dataSource.transaction(async (manager) => {
+      if (dto.status === OrderStatus.CANCELLED) {
+        await this.restoreStock(order, manager);
+      }
 
-    order.status = dto.status;
-    return this.orderRepo.save(order);
+      const fromStatus = order.status;
+      order.status = dto.status;
+      await manager.save(Order, order);
+
+      await this.recordStatusChange(manager, {
+        orderId: order.id,
+        fromStatus,
+        toStatus: dto.status,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        note: dto.note,
+      });
+
+      return this.findOne(order.id);
+    });
   }
 
-  private async restoreStock(order: Order): Promise<void> {
+  /**
+   * For other modules (e.g. payments) that need to move an order's status
+   * as a side effect of their own action, while still recording it in the
+   * order's audit trail.
+   */
+  async applyStatusChange(
+    orderId: string,
+    toStatus: OrderStatus,
+    actor: {
+      actorType: OrderStatusChangeActor;
+      actorId?: string;
+      note?: string;
+    },
+  ): Promise<Order> {
+    return this.dataSource.transaction(async (manager) => {
+      const order = await manager.findOne(Order, { where: { id: orderId } });
+      if (!order) throw new NotFoundException('Order not found');
+      if (order.status === toStatus) return order;
+
+      const fromStatus = order.status;
+      order.status = toStatus;
+      await manager.save(Order, order);
+
+      await this.recordStatusChange(manager, {
+        orderId,
+        fromStatus,
+        toStatus,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        note: actor.note,
+      });
+
+      return order;
+    });
+  }
+
+  async getStatusHistory(
+    id: string,
+    userId?: string,
+  ): Promise<OrderStatusHistory[]> {
+    const order = await this.findOne(id, userId);
+
+    return this.statusHistoryRepo.find({
+      where: { order_id: order.id },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  private async recordStatusChange(
+    manager: EntityManager,
+    params: {
+      orderId: string;
+      fromStatus: OrderStatus | null;
+      toStatus: OrderStatus;
+      actorType: OrderStatusChangeActor;
+      actorId?: string;
+      note?: string;
+    },
+  ): Promise<void> {
+    await manager.save(
+      OrderStatusHistory,
+      manager.create(OrderStatusHistory, {
+        order_id: params.orderId,
+        fromStatus: params.fromStatus,
+        toStatus: params.toStatus,
+        changedByType: params.actorType,
+        changedById: params.actorId ?? null,
+        note: params.note ?? null,
+      }),
+    );
+  }
+
+  private async restoreStock(
+    order: Order,
+    manager: EntityManager,
+  ): Promise<void> {
     const items = order.items?.length
       ? order.items
-      : await this.itemRepo.find({ where: { order_id: order.id } });
+      : await manager.find(OrderItem, { where: { order_id: order.id } });
 
     for (const item of items) {
       if (item.variant_id) {
-        await this.variantRepo.increment(
+        await manager.increment(
+          ProductVariant,
           { id: item.variant_id },
           'stock',
           item.quantity,

@@ -8,6 +8,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Order } from '@/orders/entities/order.entity';
 import { OrderStatus } from '@/orders/enums/order-status.enum';
+import { OrderStatusChangeActor } from '@/orders/enums/order-status-change-actor.enum';
+import { OrdersService } from '@/orders/orders.service';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PaymentQueryDto } from './dto/payment-query.dto';
@@ -22,6 +24,7 @@ export class PaymentsService {
     private readonly paymentRepo: Repository<Payment>,
     @InjectRepository(Order)
     private readonly orderRepo: Repository<Order>,
+    private readonly ordersService: OrdersService,
   ) {}
 
   async create(userId: string, dto: CreatePaymentDto): Promise<Payment> {
@@ -106,6 +109,7 @@ export class PaymentsService {
   async updateStatus(
     id: string,
     dto: UpdatePaymentStatusDto,
+    actorId?: string,
   ): Promise<Payment> {
     const payment = await this.findOne(id);
 
@@ -129,15 +133,27 @@ export class PaymentsService {
 
     if (dto.status === PaymentStatus.COMPLETED) {
       payment.paidAt = new Date();
-      await this.orderRepo.update(payment.order_id, {
-        status: OrderStatus.CONFIRMED,
-      });
+      await this.ordersService.applyStatusChange(
+        payment.order_id,
+        OrderStatus.CONFIRMED,
+        {
+          actorType: OrderStatusChangeActor.ADMIN,
+          actorId,
+          note: 'Payment completed',
+        },
+      );
     }
 
     if (dto.status === PaymentStatus.REFUNDED) {
-      await this.orderRepo.update(payment.order_id, {
-        status: OrderStatus.REFUNDED,
-      });
+      await this.ordersService.applyStatusChange(
+        payment.order_id,
+        OrderStatus.REFUNDED,
+        {
+          actorType: OrderStatusChangeActor.ADMIN,
+          actorId,
+          note: 'Payment refunded',
+        },
+      );
     }
 
     return this.paymentRepo.save(payment);

@@ -26,6 +26,7 @@ import {
   OrderPaginatedResponseDto,
   OrderResponseDto,
 } from './dto/order-response.dto';
+import { OrderStatusHistoryResponseDto } from './dto/order-status-history-response.dto';
 import { OrdersService } from './orders.service';
 
 @ApiTags('orders')
@@ -85,5 +86,16 @@ export class OrdersController {
     @Param('id') id: string,
   ): Promise<OrderResponseDto> {
     return this.ordersService.cancel(id, user.id!);
+  }
+
+  @Get('me/:id/history')
+  @ApiOperation({ summary: 'Get status history of my order' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiOkResponse({ type: [OrderStatusHistoryResponseDto] })
+  getHistory(
+    @CurrentUser() user: ICurrentUser,
+    @Param('id') id: string,
+  ): Promise<OrderStatusHistoryResponseDto[]> {
+    return this.ordersService.getStatusHistory(id, user.id);
   }
 }

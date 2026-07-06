@@ -7,6 +7,7 @@ import { DiscountsModule } from '@/discounts/discounts.module';
 import { CartsModule } from '@/carts/carts.module';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
+import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrdersController } from './orders.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 import { OrdersService } from './orders.service';
@@ -16,6 +17,7 @@ import { OrdersService } from './orders.service';
     TypeOrmModule.forFeature([
       Order,
       OrderItem,
+      OrderStatusHistory,
       Address,
       ProductVariant,
       Discount,

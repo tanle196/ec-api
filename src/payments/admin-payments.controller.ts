@@ -17,6 +17,8 @@ import {
 import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
 import { Permissions } from '@/permissions/decorators/permissions.decorator';
 import { PermissionsGuard } from '@/permissions/guards/permissions.guard';
+import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import type { CurrentUser as ICurrentUser } from '@/common/interfaces/current-user.interface';
 import { PaymentQueryDto } from './dto/payment-query.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import {
@@ -57,9 +59,10 @@ export class AdminPaymentsController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: AdminPaymentResponseDto })
   updateStatus(
+    @CurrentUser() user: ICurrentUser,
     @Param('id') id: string,
     @Body() dto: UpdatePaymentStatusDto,
   ): Promise<AdminPaymentResponseDto> {
-    return this.paymentsService.updateStatus(id, dto);
+    return this.paymentsService.updateStatus(id, dto, user.id);
   }
 }
