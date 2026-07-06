@@ -20,6 +20,7 @@ import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import type { CurrentUser as ICurrentUser } from '@/common/interfaces/current-user.interface';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { CheckoutDto } from './dto/checkout.dto';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
 import {
   OrderPaginatedResponseDto,
@@ -42,6 +43,16 @@ export class OrdersController {
     @Body() dto: CreateOrderDto,
   ): Promise<OrderResponseDto> {
     return this.ordersService.create(user.id!, dto);
+  }
+
+  @Post('checkout')
+  @ApiOperation({ summary: 'Create an order from my cart, then clear it' })
+  @ApiResponse({ status: 201, type: OrderResponseDto })
+  checkout(
+    @CurrentUser() user: ICurrentUser,
+    @Body() dto: CheckoutDto,
+  ): Promise<OrderResponseDto> {
+    return this.ordersService.checkout(user.id!, dto);
   }
 
   @Get('me')
