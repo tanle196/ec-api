@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsInt,
   IsNotEmpty,
+  IsOptional,
   IsString,
   MinLength,
   Min,
@@ -23,6 +24,11 @@ export class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   APP_DOMAIN!: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  SHIPPING_FLAT_FEE: number = 0;
 
   // Database
   @IsInt()

@@ -11,6 +11,7 @@ import { Address } from '@/addresses/entities/address.entity';
 import { ProductVariant } from '@/products/entities/product-variant.entity';
 import { DiscountsService } from '@/discounts/discounts.service';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { TypedConfigService } from '@/config/TypedConfigService';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -22,6 +23,18 @@ const CANCELLABLE_STATUSES: OrderStatus[] = [
   OrderStatus.PENDING,
   OrderStatus.CONFIRMED,
 ];
+
+// Valid forward-moving transitions for admin status updates; anything not
+// listed here (e.g. moving backwards, or out of a terminal status) is rejected.
+const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
+  [OrderStatus.CONFIRMED]: [OrderStatus.PROCESSING, OrderStatus.CANCELLED],
+  [OrderStatus.PROCESSING]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
+  [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED],
+  [OrderStatus.DELIVERED]: [OrderStatus.REFUNDED],
+  [OrderStatus.CANCELLED]: [],
+  [OrderStatus.REFUNDED]: [],
+};
 
 @Injectable()
 export class OrdersService {
@@ -36,6 +49,7 @@ export class OrdersService {
     private readonly variantRepo: Repository<ProductVariant>,
     private readonly dataSource: DataSource,
     private readonly discountsService: DiscountsService,
+    private readonly configService: TypedConfigService,
   ) {}
 
   async create(userId: string, dto: CreateOrderDto): Promise<Order> {
@@ -60,11 +74,6 @@ export class OrdersService {
         throw new UnprocessableEntityException(
           `Variant ${variant.sku} is inactive`,
         );
-      if (variant.stock < item.quantity) {
-        throw new UnprocessableEntityException(
-          `Insufficient stock for variant ${variant.sku}: available ${variant.stock}, requested ${item.quantity}`,
-        );
-      }
     }
 
     let subtotal = 0;
@@ -104,15 +113,27 @@ export class OrdersService {
     return this.dataSource.transaction(async (manager) => {
       for (const itemDto of dto.items) {
         const variant = variantMap.get(itemDto.variant_id)!;
-        await manager.decrement(
-          ProductVariant,
-          { id: variant.id },
-          'stock',
-          itemDto.quantity,
-        );
+
+        // Atomic conditional decrement: only succeeds if enough stock remains,
+        // preventing oversell when concurrent orders race on the same variant.
+        const updateResult = await manager
+          .createQueryBuilder()
+          .update(ProductVariant)
+          .set({ stock: () => 'stock - :qty' })
+          .where('id = :id AND stock >= :qty', {
+            id: variant.id,
+            qty: itemDto.quantity,
+          })
+          .execute();
+
+        if (updateResult.affected === 0) {
+          throw new UnprocessableEntityException(
+            `Insufficient stock for variant ${variant.sku}`,
+          );
+        }
       }
 
-      const shippingFee = 0;
+      const shippingFee = this.configService.getAppConfig().shippingFlatFee;
       const total = subtotal + shippingFee - discountAmount;
 
       const order = manager.create(Order, {
@@ -203,12 +224,10 @@ export class OrdersService {
   async updateStatus(id: string, dto: UpdateOrderStatusDto): Promise<Order> {
     const order = await this.findOne(id);
 
-    if (
-      order.status === OrderStatus.CANCELLED ||
-      order.status === OrderStatus.REFUNDED
-    ) {
+    const allowedNext = ALLOWED_TRANSITIONS[order.status];
+    if (!allowedNext.includes(dto.status)) {
       throw new BadRequestException(
-        `Cannot update status of a ${order.status} order`,
+        `Cannot transition order from "${order.status}" to "${dto.status}"`,
       );
     }
 
