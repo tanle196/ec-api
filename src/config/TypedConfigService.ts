@@ -6,6 +6,7 @@ import { GoogleConfig } from './environment/google.config';
 import { JwtConfig } from './environment/jwt.config';
 import { MailConfig } from './environment/mail.config';
 import { MediaConfig } from './environment/media.config';
+import { StripeConfig } from './environment/stripe.config';
 import { ConfigModules, ConfigModulesType } from './types/ConfigModules';
 import { AppConfig } from './environment/app.config';
 
@@ -43,6 +44,10 @@ export class TypedConfigService {
 
   getMediaConfig(): MediaConfig {
     return this.getModuleConfig<MediaConfig>(ConfigModules.Media);
+  }
+
+  getStripeConfig(): StripeConfig {
+    return this.getModuleConfig<StripeConfig>(ConfigModules.Stripe);
   }
 
   getEnv(): NodeEnv {

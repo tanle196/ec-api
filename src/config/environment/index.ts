@@ -87,4 +87,25 @@ export class EnvironmentVariables {
 
   @IsInt()
   MAIL_PORT!: number;
+
+  // STRIPE
+  @IsString()
+  @IsNotEmpty()
+  STRIPE_SECRET_KEY!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  STRIPE_WEBHOOK_SECRET!: string;
+
+  @IsOptional()
+  @IsString()
+  STRIPE_CURRENCY: string = 'vnd';
+
+  @IsString()
+  @IsNotEmpty()
+  STRIPE_CHECKOUT_SUCCESS_URL!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  STRIPE_CHECKOUT_CANCEL_URL!: string;
 }

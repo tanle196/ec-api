@@ -16,6 +16,9 @@ import { PaymentQueryDto } from './dto/payment-query.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { Payment } from './entities/payment.entity';
 import { PaymentStatus } from './enums/payment-status.enum';
+import { PaymentGatewayRegistry } from './gateways/payment-gateway.registry';
+
+type GatewayEventOutcome = 'processed' | 'already_terminal' | 'not_found';
 
 @Injectable()
 export class PaymentsService {
@@ -25,6 +28,7 @@ export class PaymentsService {
     @InjectRepository(Order)
     private readonly orderRepo: Repository<Order>,
     private readonly ordersService: OrdersService,
+    private readonly gatewayRegistry: PaymentGatewayRegistry,
   ) {}
 
   async create(userId: string, dto: CreatePaymentDto): Promise<Payment> {
@@ -54,12 +58,24 @@ export class PaymentsService {
       );
     }
 
-    const payment = this.paymentRepo.create({
-      order_id: dto.order_id,
-      method: dto.method,
-      status: PaymentStatus.PENDING,
-      amount: order.total,
-    });
+    const payment = await this.paymentRepo.save(
+      this.paymentRepo.create({
+        order_id: dto.order_id,
+        method: dto.method,
+        status: PaymentStatus.PENDING,
+        amount: order.total,
+      }),
+    );
+
+    const provider = this.gatewayRegistry.resolve(dto.method);
+    if (!provider) return payment;
+
+    const result = await provider.initiate(payment, order);
+    payment.transactionId = result.providerRef;
+    payment.metadata = {
+      ...(payment.metadata ?? {}),
+      checkoutUrl: result.redirectUrl ?? null,
+    };
 
     return this.paymentRepo.save(payment);
   }
@@ -104,6 +120,10 @@ export class PaymentsService {
       throw new ForbiddenException();
 
     return payment;
+  }
+
+  async findByTransactionId(transactionId: string): Promise<Payment | null> {
+    return this.paymentRepo.findOne({ where: { transactionId } });
   }
 
   async updateStatus(
@@ -157,5 +177,85 @@ export class PaymentsService {
     }
 
     return this.paymentRepo.save(payment);
+  }
+
+  async completeFromGatewayEvent(
+    paymentId: string,
+    transactionId: string,
+    metadata: Record<string, unknown>,
+    note: string,
+  ): Promise<GatewayEventOutcome> {
+    const payment = await this.paymentRepo.findOne({
+      where: { id: paymentId },
+    });
+    if (!payment) return 'not_found';
+    if (
+      payment.status === PaymentStatus.COMPLETED ||
+      payment.status === PaymentStatus.REFUNDED
+    ) {
+      return 'already_terminal';
+    }
+
+    payment.status = PaymentStatus.COMPLETED;
+    payment.transactionId = transactionId;
+    payment.metadata = metadata;
+    payment.paidAt = new Date();
+    await this.paymentRepo.save(payment);
+
+    await this.ordersService.applyStatusChange(
+      payment.order_id,
+      OrderStatus.CONFIRMED,
+      { actorType: OrderStatusChangeActor.SYSTEM, note },
+    );
+
+    return 'processed';
+  }
+
+  async failFromGatewayEvent(
+    paymentId: string,
+    metadata: Record<string, unknown>,
+  ): Promise<GatewayEventOutcome> {
+    const payment = await this.paymentRepo.findOne({
+      where: { id: paymentId },
+    });
+    if (!payment) return 'not_found';
+    if (
+      payment.status === PaymentStatus.COMPLETED ||
+      payment.status === PaymentStatus.REFUNDED
+    ) {
+      return 'already_terminal';
+    }
+
+    payment.status = PaymentStatus.FAILED;
+    payment.metadata = metadata;
+    await this.paymentRepo.save(payment);
+
+    return 'processed';
+  }
+
+  async refundFromGatewayEvent(
+    paymentId: string,
+    metadata: Record<string, unknown>,
+    note: string,
+  ): Promise<GatewayEventOutcome> {
+    const payment = await this.paymentRepo.findOne({
+      where: { id: paymentId },
+    });
+    if (!payment) return 'not_found';
+    if (payment.status === PaymentStatus.REFUNDED) {
+      return 'already_terminal';
+    }
+
+    payment.status = PaymentStatus.REFUNDED;
+    payment.metadata = metadata;
+    await this.paymentRepo.save(payment);
+
+    await this.ordersService.applyStatusChange(
+      payment.order_id,
+      OrderStatus.REFUNDED,
+      { actorType: OrderStatusChangeActor.SYSTEM, note },
+    );
+
+    return 'processed';
   }
 }

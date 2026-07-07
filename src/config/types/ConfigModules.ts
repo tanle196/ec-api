@@ -5,6 +5,7 @@ export const ConfigModules = {
   Google: 'google',
   Mail: 'mail',
   Media: 'media',
+  Stripe: 'stripe',
 } as const;
 
 export type ConfigModulesType =

@@ -8,6 +8,7 @@ import jwtConfig from './environment/jwt.config';
 import mailConfig from './environment/mail.config';
 import appConfig from './environment/app.config';
 import mediaConfig from './environment/media.config';
+import stripeConfig from './environment/stripe.config';
 
 @Global()
 @Module({
@@ -22,6 +23,7 @@ import mediaConfig from './environment/media.config';
         jwtConfig,
         mailConfig,
         mediaConfig,
+        stripeConfig,
       ],
       validate: validateConfig,
       expandVariables: true,
