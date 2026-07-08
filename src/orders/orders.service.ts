@@ -18,7 +18,11 @@ import { MailService } from '@/mail/mail.service';
 import { UsersService } from '@/users/users.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CheckoutDto } from './dto/checkout.dto';
-import { OrderListQueryDto } from './dto/order-list-query.dto';
+import {
+  OrderListQueryDto,
+  OrderSortField,
+  SortOrder,
+} from './dto/order-list-query.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
@@ -294,7 +298,17 @@ export class OrdersService {
     requesterId?: string,
     isAdmin = false,
   ): Promise<PaginatedResponseDto<Order>> {
-    const { page = 1, limit = 20, status, user_id } = query;
+    const {
+      page = 1,
+      limit = 20,
+      status,
+      user_id,
+      order_number,
+      from_date,
+      to_date,
+      sort_by = OrderSortField.CREATED_AT,
+      sort_order = SortOrder.DESC,
+    } = query;
 
     const qb = this.orderRepo.createQueryBuilder('o');
 
@@ -306,8 +320,26 @@ export class OrdersService {
 
     if (status) qb.andWhere('o.status = :status', { status });
 
+    if (order_number) {
+      qb.andWhere('o.orderNumber ILIKE :orderNumber', {
+        orderNumber: `%${order_number}%`,
+      });
+    }
+
+    if (from_date) {
+      qb.andWhere('o.createdAt >= :fromDate', { fromDate: from_date });
+    }
+
+    if (to_date) {
+      // A date-only string (e.g. "2026-12-31") should include the entire
+      // day, not just midnight, so push it to the end of day in that case.
+      const toDate =
+        to_date.length === 10 ? `${to_date}T23:59:59.999Z` : to_date;
+      qb.andWhere('o.createdAt <= :toDate', { toDate });
+    }
+
     const [data, total] = await qb
-      .orderBy('o.createdAt', 'DESC')
+      .orderBy(`o.${sort_by}`, sort_order)
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
