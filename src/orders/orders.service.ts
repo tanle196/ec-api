@@ -23,6 +23,7 @@ import {
   OrderSortField,
   SortOrder,
 } from './dto/order-list-query.dto';
+import { UpdateOrderDto } from './dto/update-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
@@ -358,6 +359,113 @@ export class OrdersService {
     if (userId && order.user_id !== userId) throw new ForbiddenException();
 
     return order;
+  }
+
+  async update(
+    id: string,
+    userId: string,
+    dto: UpdateOrderDto,
+  ): Promise<Order> {
+    const order = await this.findOne(id, userId);
+
+    if (order.status !== OrderStatus.PENDING) {
+      throw new BadRequestException(
+        `Cannot edit an order with status "${order.status}"`,
+      );
+    }
+
+    let addressId = order.address_id;
+    if (dto.address_id && dto.address_id !== order.address_id) {
+      const address = await this.addressRepo.findOne({
+        where: { id: dto.address_id, user_id: userId },
+      });
+      if (!address) throw new NotFoundException('Address not found');
+      addressId = dto.address_id;
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      if (dto.items) {
+        // Release stock held by the current items before re-resolving and
+        // decrementing for the new set, so quantity decreases free up stock
+        // and increases are checked against availability atomically.
+        await this.restoreStock(order, manager);
+
+        const { subtotal, resolvedItems, variantMap } =
+          await this.resolveOrderItems(dto.items);
+
+        for (const item of resolvedItems) {
+          const updateResult = await manager
+            .createQueryBuilder()
+            .update(ProductVariant)
+            .set({ stock: () => 'stock - :qty' })
+            .where('id = :id AND stock >= :qty', {
+              id: item.variant_id,
+              qty: item.quantity,
+            })
+            .execute();
+
+          if (updateResult.affected === 0) {
+            const sku = variantMap.get(item.variant_id)?.sku ?? item.variant_id;
+            throw new UnprocessableEntityException(
+              `Insufficient stock for variant ${sku}`,
+            );
+          }
+        }
+
+        let discountAmount = 0;
+        for (const discount of order.discounts) {
+          if (
+            discount.minOrderValue !== null &&
+            subtotal < Number(discount.minOrderValue)
+          ) {
+            throw new BadRequestException(
+              `Order no longer meets the minimum value for discount code "${discount.code}"`,
+            );
+          }
+          discountAmount += this.discountsService.computeAmount(
+            discount,
+            subtotal,
+          );
+        }
+
+        await manager.delete(OrderItem, { order_id: order.id });
+        await manager.save(
+          OrderItem,
+          resolvedItems.map((item) =>
+            manager.create(OrderItem, { ...item, order_id: order.id }),
+          ),
+        );
+
+        order.subtotal = subtotal;
+        order.discount = discountAmount;
+        order.total = subtotal + Number(order.shippingFee) - discountAmount;
+      }
+
+      order.address_id = addressId;
+      if (dto.notes !== undefined) order.notes = dto.notes;
+
+      // `order.items` still holds the pre-edit relation snapshot, and Order's
+      // OneToMany to OrderItem cascades; save() would try to re-persist those
+      // stale rows (now deleted above) instead of the freshly created ones.
+      // A targeted update() sidesteps the cascade entirely.
+      await manager.update(Order, order.id, {
+        address_id: order.address_id,
+        notes: order.notes,
+        subtotal: order.subtotal,
+        discount: order.discount,
+        total: order.total,
+      });
+
+      // Read back through the transactional manager, not `this.orderRepo`
+      // (a separate connection) — the latter can't see this transaction's
+      // uncommitted writes and would return pre-edit data.
+      const updated = await manager.findOne(Order, {
+        where: { id: order.id },
+        relations: ['items', 'address', 'discounts'],
+      });
+      if (!updated) throw new NotFoundException('Order not found');
+      return updated;
+    });
   }
 
   async cancel(id: string, userId: string): Promise<Order> {

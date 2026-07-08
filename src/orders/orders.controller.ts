@@ -22,6 +22,7 @@ import type { CurrentUser as ICurrentUser } from '@/common/interfaces/current-us
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
+import { UpdateOrderDto } from './dto/update-order.dto';
 import {
   OrderPaginatedResponseDto,
   OrderResponseDto,
@@ -75,6 +76,20 @@ export class OrdersController {
     @Param('id') id: string,
   ): Promise<OrderResponseDto> {
     return this.ordersService.findOne(id, user.id);
+  }
+
+  @Patch('me/:id')
+  @ApiOperation({
+    summary: 'Update my order (address/items/notes) while still pending',
+  })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiOkResponse({ type: OrderResponseDto })
+  update(
+    @CurrentUser() user: ICurrentUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateOrderDto,
+  ): Promise<OrderResponseDto> {
+    return this.ordersService.update(id, user.id!, dto);
   }
 
   @Patch('me/:id/cancel')
