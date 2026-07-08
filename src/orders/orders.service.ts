@@ -53,6 +53,7 @@ const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED],
   [OrderStatus.DELIVERED]: [OrderStatus.REFUNDED],
   [OrderStatus.CANCELLED]: [],
+  [OrderStatus.PARTIALLY_REFUNDED]: [OrderStatus.REFUNDED],
   [OrderStatus.REFUNDED]: [],
 };
 

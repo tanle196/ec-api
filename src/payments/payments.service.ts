@@ -11,11 +11,16 @@ import { OrderStatus } from '@/orders/enums/order-status.enum';
 import { OrderStatusChangeActor } from '@/orders/enums/order-status-change-actor.enum';
 import { OrdersService } from '@/orders/orders.service';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { OrderItem } from '@/orders/entities/order-item.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
+import { CreateRefundDto } from './dto/create-refund.dto';
 import { PaymentQueryDto } from './dto/payment-query.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { Payment } from './entities/payment.entity';
+import { Refund } from './entities/refund.entity';
+import { RefundItem } from './entities/refund-item.entity';
 import { PaymentStatus } from './enums/payment-status.enum';
+import { RefundStatus } from './enums/refund-status.enum';
 import { PaymentGatewayRegistry } from './gateways/payment-gateway.registry';
 
 type GatewayEventOutcome = 'processed' | 'already_terminal' | 'not_found';
@@ -27,6 +32,8 @@ export class PaymentsService {
     private readonly paymentRepo: Repository<Payment>,
     @InjectRepository(Order)
     private readonly orderRepo: Repository<Order>,
+    @InjectRepository(Refund)
+    private readonly refundRepo: Repository<Refund>,
     private readonly ordersService: OrdersService,
     private readonly gatewayRegistry: PaymentGatewayRegistry,
   ) {}
@@ -135,6 +142,7 @@ export class PaymentsService {
 
     if (
       payment.status === PaymentStatus.COMPLETED ||
+      payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
       payment.status === PaymentStatus.REFUNDED
     ) {
       throw new BadRequestException(
@@ -191,6 +199,7 @@ export class PaymentsService {
     if (!payment) return 'not_found';
     if (
       payment.status === PaymentStatus.COMPLETED ||
+      payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
       payment.status === PaymentStatus.REFUNDED
     ) {
       return 'already_terminal';
@@ -221,6 +230,7 @@ export class PaymentsService {
     if (!payment) return 'not_found';
     if (
       payment.status === PaymentStatus.COMPLETED ||
+      payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
       payment.status === PaymentStatus.REFUNDED
     ) {
       return 'already_terminal';
@@ -233,9 +243,15 @@ export class PaymentsService {
     return 'processed';
   }
 
+  /**
+   * Handles refunds confirmed by the gateway that didn't originate from
+   * `createRefund` (e.g. issued directly from the Stripe dashboard). Uses
+   * the charge's running refunded total to stay partial-refund aware, and
+   * is idempotent against refunds we already recorded ourselves.
+   */
   async refundFromGatewayEvent(
     paymentId: string,
-    metadata: Record<string, unknown>,
+    charge: Record<string, unknown>,
     note: string,
   ): Promise<GatewayEventOutcome> {
     const payment = await this.paymentRepo.findOne({
@@ -246,16 +262,218 @@ export class PaymentsService {
       return 'already_terminal';
     }
 
-    payment.status = PaymentStatus.REFUNDED;
-    payment.metadata = metadata;
+    const latestRefundId = this.extractLatestRefundId(charge);
+    if (latestRefundId) {
+      const alreadyRecorded = await this.refundRepo.findOne({
+        where: { transactionId: latestRefundId },
+      });
+      if (alreadyRecorded) return 'already_terminal';
+    }
+
+    const amountTotal = Number(charge.amount ?? payment.amount);
+    const amountRefundedTotal = Number(charge.amount_refunded ?? 0);
+    const alreadyRefunded = await this.sumSucceededRefundAmount(paymentId);
+    const newAmount = amountRefundedTotal - alreadyRefunded;
+    if (newAmount <= 0) return 'already_terminal';
+
+    await this.refundRepo.save(
+      this.refundRepo.create({
+        payment_id: payment.id,
+        order_id: payment.order_id,
+        amount: newAmount,
+        reason: note,
+        status: RefundStatus.SUCCEEDED,
+        transactionId: latestRefundId,
+        metadata: charge,
+      }),
+    );
+
+    payment.status =
+      amountRefundedTotal >= amountTotal
+        ? PaymentStatus.REFUNDED
+        : PaymentStatus.PARTIALLY_REFUNDED;
     await this.paymentRepo.save(payment);
 
     await this.ordersService.applyStatusChange(
       payment.order_id,
-      OrderStatus.REFUNDED,
+      payment.status === PaymentStatus.REFUNDED
+        ? OrderStatus.REFUNDED
+        : OrderStatus.PARTIALLY_REFUNDED,
       { actorType: OrderStatusChangeActor.SYSTEM, note },
     );
 
     return 'processed';
+  }
+
+  async createRefund(
+    paymentId: string,
+    dto: CreateRefundDto,
+    actorId?: string,
+  ): Promise<Refund> {
+    const payment = await this.paymentRepo.findOne({
+      where: { id: paymentId },
+      relations: ['order', 'order.items'],
+    });
+    if (!payment) throw new NotFoundException('Payment not found');
+
+    if (
+      payment.status !== PaymentStatus.COMPLETED &&
+      payment.status !== PaymentStatus.PARTIALLY_REFUNDED
+    ) {
+      throw new BadRequestException(
+        `Cannot refund a payment with status "${payment.status}"`,
+      );
+    }
+
+    const orderItemsById = new Map<string, OrderItem>(
+      payment.order.items.map((item) => [item.id, item]),
+    );
+
+    const requestedItemIds = new Set<string>();
+    for (const reqItem of dto.items) {
+      if (requestedItemIds.has(reqItem.order_item_id)) {
+        throw new BadRequestException(
+          `Order item ${reqItem.order_item_id} is listed more than once`,
+        );
+      }
+      requestedItemIds.add(reqItem.order_item_id);
+    }
+
+    const refundedQtyByItem = await this.getRefundedQuantitiesByItem(paymentId);
+
+    let amount = 0;
+    const itemsToCreate: Partial<RefundItem>[] = [];
+
+    for (const reqItem of dto.items) {
+      const orderItem = orderItemsById.get(reqItem.order_item_id);
+      if (!orderItem) {
+        throw new BadRequestException(
+          `Order item ${reqItem.order_item_id} does not belong to this order`,
+        );
+      }
+
+      const alreadyRefundedQty = refundedQtyByItem.get(orderItem.id) ?? 0;
+      const refundableQty = orderItem.quantity - alreadyRefundedQty;
+      if (reqItem.quantity > refundableQty) {
+        throw new BadRequestException(
+          `Cannot refund ${reqItem.quantity} of "${orderItem.productName}" — only ${refundableQty} left refundable`,
+        );
+      }
+
+      const itemAmount = Number(orderItem.unitPrice) * reqItem.quantity;
+      amount += itemAmount;
+
+      itemsToCreate.push({
+        order_item_id: orderItem.id,
+        quantity: reqItem.quantity,
+        amount: itemAmount,
+      });
+    }
+
+    const alreadyRefundedTotal = await this.sumSucceededRefundAmount(paymentId);
+    if (alreadyRefundedTotal + amount > Number(payment.amount)) {
+      throw new BadRequestException(
+        'Refund amount exceeds the remaining refundable balance',
+      );
+    }
+
+    const refund = await this.refundRepo.save(
+      this.refundRepo.create({
+        payment_id: payment.id,
+        order_id: payment.order_id,
+        amount,
+        reason: dto.reason,
+        status: RefundStatus.PENDING,
+        actorId: actorId ?? null,
+        items: itemsToCreate as RefundItem[],
+      }),
+    );
+
+    const provider = this.gatewayRegistry.resolve(payment.method);
+
+    try {
+      if (provider?.refund) {
+        const result = await provider.refund(payment, amount, dto.reason);
+        refund.transactionId = result.providerRef;
+        refund.metadata = result.raw ?? null;
+      }
+      refund.status = RefundStatus.SUCCEEDED;
+      await this.refundRepo.save(refund);
+    } catch (error) {
+      refund.status = RefundStatus.FAILED;
+      refund.metadata = {
+        error: error instanceof Error ? error.message : String(error),
+      };
+      await this.refundRepo.save(refund);
+      throw error;
+    }
+
+    const totalRefunded = alreadyRefundedTotal + amount;
+    payment.status =
+      totalRefunded >= Number(payment.amount)
+        ? PaymentStatus.REFUNDED
+        : PaymentStatus.PARTIALLY_REFUNDED;
+    await this.paymentRepo.save(payment);
+
+    await this.ordersService.applyStatusChange(
+      payment.order_id,
+      payment.status === PaymentStatus.REFUNDED
+        ? OrderStatus.REFUNDED
+        : OrderStatus.PARTIALLY_REFUNDED,
+      {
+        actorType: OrderStatusChangeActor.ADMIN,
+        actorId,
+        note: `Refund: ${dto.reason}`,
+      },
+    );
+
+    const created = await this.refundRepo.findOne({
+      where: { id: refund.id },
+    });
+    if (!created) throw new NotFoundException('Refund not found');
+    return created;
+  }
+
+  async findRefunds(paymentId: string): Promise<Refund[]> {
+    return this.refundRepo.find({
+      where: { payment_id: paymentId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  private async getRefundedQuantitiesByItem(
+    paymentId: string,
+  ): Promise<Map<string, number>> {
+    const refunds = await this.refundRepo.find({
+      where: { payment_id: paymentId, status: RefundStatus.SUCCEEDED },
+    });
+
+    const refundedQtyByItem = new Map<string, number>();
+    for (const refund of refunds) {
+      for (const item of refund.items) {
+        refundedQtyByItem.set(
+          item.order_item_id,
+          (refundedQtyByItem.get(item.order_item_id) ?? 0) + item.quantity,
+        );
+      }
+    }
+    return refundedQtyByItem;
+  }
+
+  private async sumSucceededRefundAmount(paymentId: string): Promise<number> {
+    const result = await this.refundRepo
+      .createQueryBuilder('r')
+      .select('COALESCE(SUM(r.amount), 0)', 'total')
+      .where('r.payment_id = :paymentId', { paymentId })
+      .andWhere('r.status = :status', { status: RefundStatus.SUCCEEDED })
+      .getRawOne<{ total: string }>();
+    return Number(result?.total ?? 0);
+  }
+
+  private extractLatestRefundId(
+    charge: Record<string, unknown>,
+  ): string | null {
+    const refunds = charge.refunds as { data?: { id: string }[] } | undefined;
+    return refunds?.data?.[0]?.id ?? null;
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Order } from '@/orders/entities/order.entity';
 import { TypedConfigService } from '@/config/TypedConfigService';
 import { Payment } from '../../entities/payment.entity';
@@ -6,6 +6,7 @@ import { PaymentMethod } from '../../enums/payment-method.enum';
 import {
   PaymentGatewayProvider,
   PaymentInitiationResult,
+  PaymentRefundResult,
 } from '../payment-gateway.interface';
 import { StripeClientProvider } from './stripe-client.provider';
 
@@ -58,6 +59,32 @@ export class StripeGatewayProvider implements PaymentGatewayProvider {
       providerRef: session.id,
       redirectUrl: session.url ?? undefined,
       raw: session as unknown as Record<string, unknown>,
+    };
+  }
+
+  async refund(
+    payment: Payment,
+    amount: number,
+    reason: string,
+  ): Promise<PaymentRefundResult> {
+    if (!payment.transactionId) {
+      throw new BadRequestException(
+        'Payment has no Stripe payment intent to refund',
+      );
+    }
+
+    const refund = await this.stripeClient.client.refunds.create({
+      payment_intent: payment.transactionId,
+      amount: Math.round(amount),
+      metadata: {
+        payment_id: payment.id,
+        reason,
+      },
+    });
+
+    return {
+      providerRef: refund.id,
+      raw: refund as unknown as Record<string, unknown>,
     };
   }
 }

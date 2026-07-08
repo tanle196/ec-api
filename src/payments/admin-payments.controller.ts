@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -19,7 +20,9 @@ import { Permissions } from '@/permissions/decorators/permissions.decorator';
 import { PermissionsGuard } from '@/permissions/guards/permissions.guard';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import type { CurrentUser as ICurrentUser } from '@/common/interfaces/current-user.interface';
+import { CreateRefundDto } from './dto/create-refund.dto';
 import { PaymentQueryDto } from './dto/payment-query.dto';
+import { RefundResponseDto } from './dto/refund-response.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import {
   AdminPaymentPaginatedResponseDto,
@@ -64,5 +67,29 @@ export class AdminPaymentsController {
     @Body() dto: UpdatePaymentStatusDto,
   ): Promise<AdminPaymentResponseDto> {
     return this.paymentsService.updateStatus(id, dto, user.id);
+  }
+
+  @Post(':id/refunds')
+  @Permissions('payment.update')
+  @ApiOperation({
+    summary: 'Admin: refund a payment (full or partial, by item)',
+  })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiOkResponse({ type: RefundResponseDto })
+  createRefund(
+    @CurrentUser() user: ICurrentUser,
+    @Param('id') id: string,
+    @Body() dto: CreateRefundDto,
+  ): Promise<RefundResponseDto> {
+    return this.paymentsService.createRefund(id, dto, user.id);
+  }
+
+  @Get(':id/refunds')
+  @Permissions('payment.read')
+  @ApiOperation({ summary: 'Admin: list refunds for a payment' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiOkResponse({ type: [RefundResponseDto] })
+  findRefunds(@Param('id') id: string): Promise<RefundResponseDto[]> {
+    return this.paymentsService.findRefunds(id);
   }
 }

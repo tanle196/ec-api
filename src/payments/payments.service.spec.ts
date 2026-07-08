@@ -24,6 +24,18 @@ describe('PaymentsService', () => {
     const orderRepo = {
       findOne: jest.fn().mockResolvedValue(order),
     };
+    const refundRepo = {
+      findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn().mockImplementation((data: object) => ({ ...data })),
+      save: jest.fn().mockImplementation((data) => Promise.resolve(data)),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ total: '0' }),
+      }),
+    };
     const ordersService = {
       applyStatusChange: jest.fn().mockResolvedValue(undefined),
     };
@@ -34,11 +46,19 @@ describe('PaymentsService', () => {
     const service = new PaymentsService(
       paymentRepo as never,
       orderRepo as never,
+      refundRepo as never,
       ordersService as never,
       gatewayRegistry as never,
     );
 
-    return { service, paymentRepo, orderRepo, ordersService, gatewayRegistry };
+    return {
+      service,
+      paymentRepo,
+      orderRepo,
+      refundRepo,
+      ordersService,
+      gatewayRegistry,
+    };
   };
 
   describe('create', () => {

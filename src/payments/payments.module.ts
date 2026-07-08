@@ -4,6 +4,8 @@ import { Order } from '@/orders/entities/order.entity';
 import { OrdersModule } from '@/orders/orders.module';
 import { PaymentWebhookEvent } from './entities/payment-webhook-event.entity';
 import { Payment } from './entities/payment.entity';
+import { Refund } from './entities/refund.entity';
+import { RefundItem } from './entities/refund-item.entity';
 import { PaymentGatewayRegistry } from './gateways/payment-gateway.registry';
 import { PAYMENT_GATEWAY_PROVIDERS } from './gateways/tokens';
 import { StripeClientProvider } from './gateways/stripe/stripe-client.provider';
@@ -17,7 +19,13 @@ import { PaymentsService } from './payments.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Payment, Order, PaymentWebhookEvent]),
+    TypeOrmModule.forFeature([
+      Payment,
+      Order,
+      PaymentWebhookEvent,
+      Refund,
+      RefundItem,
+    ]),
     OrdersModule,
   ],
   controllers: [
