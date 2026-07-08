@@ -14,6 +14,8 @@ import { CartsService } from '@/carts/carts.service';
 import { CartItem } from '@/carts/entities/cart-item.entity';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { TypedConfigService } from '@/config/TypedConfigService';
+import { MailService } from '@/mail/mail.service';
+import { UsersService } from '@/users/users.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
@@ -65,6 +67,8 @@ export class OrdersService {
     private readonly discountsService: DiscountsService,
     private readonly configService: TypedConfigService,
     private readonly cartsService: CartsService,
+    private readonly mailService: MailService,
+    private readonly usersService: UsersService,
   ) {}
 
   async create(userId: string, dto: CreateOrderDto): Promise<Order> {
@@ -80,7 +84,7 @@ export class OrdersService {
       subtotal,
     );
 
-    return this.dataSource.transaction((manager) =>
+    const order = await this.dataSource.transaction((manager) =>
       this.persistOrder(manager, {
         userId,
         addressId: dto.address_id,
@@ -92,6 +96,10 @@ export class OrdersService {
         notes: dto.notes,
       }),
     );
+
+    void this.notifyOrderConfirmation(order);
+
+    return order;
   }
 
   async checkout(userId: string, dto: CheckoutDto): Promise<Order> {
@@ -117,7 +125,7 @@ export class OrdersService {
       subtotal,
     );
 
-    return this.dataSource.transaction((manager) =>
+    const order = await this.dataSource.transaction((manager) =>
       this.persistOrder(manager, {
         userId,
         addressId: dto.address_id,
@@ -130,6 +138,10 @@ export class OrdersService {
         cartId: cart.id,
       }),
     );
+
+    void this.notifyOrderConfirmation(order);
+
+    return order;
   }
 
   private async resolveOrderItems(
@@ -324,10 +336,11 @@ export class OrdersService {
       );
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    const fromStatus = order.status;
+
+    const updated = await this.dataSource.transaction(async (manager) => {
       await this.restoreStock(order, manager);
 
-      const fromStatus = order.status;
       order.status = OrderStatus.CANCELLED;
       await manager.save(Order, order);
 
@@ -341,6 +354,10 @@ export class OrdersService {
 
       return this.findOne(order.id);
     });
+
+    void this.notifyOrderStatusUpdate(updated, fromStatus);
+
+    return updated;
   }
 
   async updateStatus(
@@ -357,12 +374,13 @@ export class OrdersService {
       );
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    const fromStatus = order.status;
+
+    const updated = await this.dataSource.transaction(async (manager) => {
       if (dto.status === OrderStatus.CANCELLED) {
         await this.restoreStock(order, manager);
       }
 
-      const fromStatus = order.status;
       order.status = dto.status;
       await manager.save(Order, order);
 
@@ -377,6 +395,10 @@ export class OrdersService {
 
       return this.findOne(order.id);
     });
+
+    void this.notifyOrderStatusUpdate(updated, fromStatus);
+
+    return updated;
   }
 
   /**
@@ -393,26 +415,36 @@ export class OrdersService {
       note?: string;
     },
   ): Promise<Order> {
-    return this.dataSource.transaction(async (manager) => {
-      const order = await manager.findOne(Order, { where: { id: orderId } });
-      if (!order) throw new NotFoundException('Order not found');
-      if (order.status === toStatus) return order;
+    const { order, fromStatus } = await this.dataSource.transaction(
+      async (manager) => {
+        const order = await manager.findOne(Order, {
+          where: { id: orderId },
+        });
+        if (!order) throw new NotFoundException('Order not found');
+        if (order.status === toStatus) return { order, fromStatus: null };
 
-      const fromStatus = order.status;
-      order.status = toStatus;
-      await manager.save(Order, order);
+        const fromStatus = order.status;
+        order.status = toStatus;
+        await manager.save(Order, order);
 
-      await this.recordStatusChange(manager, {
-        orderId,
-        fromStatus,
-        toStatus,
-        actorType: actor.actorType,
-        actorId: actor.actorId,
-        note: actor.note,
-      });
+        await this.recordStatusChange(manager, {
+          orderId,
+          fromStatus,
+          toStatus,
+          actorType: actor.actorType,
+          actorId: actor.actorId,
+          note: actor.note,
+        });
 
-      return order;
-    });
+        return { order, fromStatus };
+      },
+    );
+
+    if (fromStatus !== null) {
+      void this.notifyOrderStatusUpdate(order, fromStatus);
+    }
+
+    return order;
   }
 
   async getStatusHistory(
@@ -469,6 +501,40 @@ export class OrdersService {
         );
       }
     }
+  }
+
+  private async notifyOrderConfirmation(order: Order): Promise<void> {
+    const user = await this.usersService.findById(order.user_id);
+    if (!user) return;
+
+    await this.mailService.sendOrderConfirmation(user.email, {
+      orderNumber: order.orderNumber,
+      items: order.items.map((item) => ({
+        productName: item.productName,
+        variantName: item.variantName,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        total: Number(item.total),
+      })),
+      subtotal: Number(order.subtotal),
+      shippingFee: Number(order.shippingFee),
+      discount: Number(order.discount),
+      total: Number(order.total),
+    });
+  }
+
+  private async notifyOrderStatusUpdate(
+    order: Order,
+    fromStatus: OrderStatus | null,
+  ): Promise<void> {
+    const user = await this.usersService.findById(order.user_id);
+    if (!user) return;
+
+    await this.mailService.sendOrderStatusUpdate(user.email, {
+      orderNumber: order.orderNumber,
+      fromStatus,
+      toStatus: order.status,
+    });
   }
 
   private generateOrderNumber(): string {

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Order Confirmation</title>
+  </head>
+  <body style="font-family: Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 0;">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td align="center" style="padding: 20px;">
+          <table width="600" cellpadding="0" cellspacing="0" style="background: #ffffff; border-radius: 8px; padding: 30px;">
+            <tr>
+              <td align="center" style="padding-bottom: 20px;">
+                <h1 style="color: #333;">Thanks for your order! 🎉</h1>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <p style="font-size: 16px; color: #555;">Hello <strong>{{email}}</strong>,</p>
+                <p style="font-size: 16px; color: #555;">
+                  We've received your order <strong>{{orderNumber}}</strong> and it's now being processed.
+                </p>
+                <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse: collapse; margin: 20px 0;">
+                  <tr>
+                    <td style="border-bottom: 1px solid #eee; font-size: 14px; color: #333; font-weight: bold;">Item</td>
+                    <td style="border-bottom: 1px solid #eee; font-size: 14px; color: #333; font-weight: bold;" align="center">Qty</td>
+                    <td style="border-bottom: 1px solid #eee; font-size: 14px; color: #333; font-weight: bold;" align="right">Total</td>
+                  </tr>
+                  {{#each items}}
+                  <tr>
+                    <td style="border-bottom: 1px solid #eee; font-size: 14px; color: #555;">
+                      {{this.productName}}{{#if this.variantName}} ({{this.variantName}}){{/if}}
+                    </td>
+                    <td style="border-bottom: 1px solid #eee; font-size: 14px; color: #555;" align="center">{{this.quantity}}</td>
+                    <td style="border-bottom: 1px solid #eee; font-size: 14px; color: #555;" align="right">{{this.total}}</td>
+                  </tr>
+                  {{/each}}
+                </table>
+                <table width="100%" cellpadding="4" cellspacing="0" style="font-size: 14px; color: #555;">
+                  <tr>
+                    <td>Subtotal</td>
+                    <td align="right">{{subtotal}}</td>
+                  </tr>
+                  <tr>
+                    <td>Shipping</td>
+                    <td align="right">{{shippingFee}}</td>
+                  </tr>
+                  <tr>
+                    <td>Discount</td>
+                    <td align="right">-{{discount}}</td>
+                  </tr>
+                  <tr>
+                    <td style="font-weight: bold; padding-top: 8px; border-top: 1px solid #eee;">Total</td>
+                    <td align="right" style="font-weight: bold; padding-top: 8px; border-top: 1px solid #eee;">{{total}}</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding-top: 20px; border-top: 1px solid #eee; text-align: center; font-size: 12px; color: #aaa;">
+                © {{year}} My App. All rights reserved.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
