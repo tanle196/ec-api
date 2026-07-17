@@ -38,6 +38,12 @@ export class PermissionsService {
     return this.permissionRepo.save(permission);
   }
 
+  async findAllRaw(): Promise<Permission[]> {
+    return this.permissionRepo.find({
+      order: { module: 'ASC', action: 'ASC' },
+    });
+  }
+
   async findAll(
     query: PermissionListQueryDto,
   ): Promise<PaginatedResponseDto<PermissionResponseDto>> {

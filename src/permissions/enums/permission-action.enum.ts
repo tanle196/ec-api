@@ -5,5 +5,6 @@ export enum PermissionAction {
   DELETE = 'delete',
   CANCEL = 'cancel',
   PUBLISH = 'publish',
+  UPLOAD = 'upload',
   ASSIGN_ROLE = 'assign.role',
 }

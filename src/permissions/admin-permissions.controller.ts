@@ -63,6 +63,18 @@ export class AdminPermissionsController {
     return this.service.findAll(query);
   }
 
+  @Get('all')
+  @Permissions('permission.read')
+  @ApiOperation({
+    summary: 'Get all permissions (no pagination)',
+    description:
+      'Returns the full permission list, e.g. for rendering a role/permission assignment UI.',
+  })
+  @ApiResponse({ status: 200, type: [Permission] })
+  findAllRaw() {
+    return this.service.findAllRaw();
+  }
+
   @Get(':id')
   @Permissions('permission.read')
   @ApiOperation({ summary: 'Get permission by id' })

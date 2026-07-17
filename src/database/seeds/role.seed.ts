@@ -18,18 +18,61 @@ const ROLES: RoleSeedData[] = [
     name: 'admin',
     description: 'Quản trị viên',
     permissionKeys: [
+      // users
       { module: 'user', action: 'create' },
       { module: 'user', action: 'read' },
       { module: 'user', action: 'update' },
       { module: 'user', action: 'delete' },
       { module: 'user', action: 'assign.role' },
+      // roles & permissions: chỉ xem, không được tạo/sửa/xoá (dành riêng cho super-admin)
       { module: 'role', action: 'read' },
       { module: 'permission', action: 'read' },
+      // categories
+      { module: 'category', action: 'create' },
+      { module: 'category', action: 'read' },
+      { module: 'category', action: 'update' },
+      { module: 'category', action: 'delete' },
+      // products
+      { module: 'product', action: 'create' },
+      { module: 'product', action: 'read' },
+      { module: 'product', action: 'update' },
+      { module: 'product', action: 'delete' },
+      { module: 'product', action: 'publish' },
+      // orders
       { module: 'order', action: 'read' },
       { module: 'order', action: 'update' },
+      // payments
+      { module: 'payment', action: 'read' },
+      { module: 'payment', action: 'update' },
+      // reviews
       { module: 'review', action: 'read' },
       { module: 'review', action: 'update' },
       { module: 'review', action: 'delete' },
+      // addresses
+      { module: 'address', action: 'read' },
+      { module: 'address', action: 'create' },
+      { module: 'address', action: 'update' },
+      { module: 'address', action: 'delete' },
+      // carts
+      { module: 'cart', action: 'read' },
+      { module: 'cart', action: 'update' },
+      { module: 'cart', action: 'delete' },
+      // wishlists
+      { module: 'wishlist', action: 'read' },
+      { module: 'wishlist', action: 'delete' },
+      // discounts
+      { module: 'discount', action: 'create' },
+      { module: 'discount', action: 'read' },
+      { module: 'discount', action: 'update' },
+      { module: 'discount', action: 'delete' },
+      // banners
+      { module: 'banner', action: 'create' },
+      { module: 'banner', action: 'read' },
+      { module: 'banner', action: 'update' },
+      { module: 'banner', action: 'delete' },
+      // media
+      { module: 'media', action: 'upload' },
+      { module: 'media', action: 'delete' },
     ],
   },
   {

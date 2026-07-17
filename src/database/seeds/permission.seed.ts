@@ -307,6 +307,20 @@ const PERMISSIONS: Pick<
     description: 'Xoá banner',
     isSystem: true,
   },
+
+  // media
+  {
+    module: 'media',
+    action: PermissionAction.UPLOAD,
+    description: 'Tải ảnh lên',
+    isSystem: true,
+  },
+  {
+    module: 'media',
+    action: PermissionAction.DELETE,
+    description: 'Xoá ảnh',
+    isSystem: true,
+  },
 ];
 
 export async function seedPermissions(
