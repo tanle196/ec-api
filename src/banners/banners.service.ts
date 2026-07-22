@@ -1,12 +1,12 @@
+import { MediaService } from '@/media/media.service';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThanOrEqual, MoreThanOrEqual, Or, IsNull, Repository } from 'typeorm';
-import { MediaService } from '@/media/media.service';
+import { Repository } from 'typeorm';
+import { CreateBannerDto } from './dto/create-banner.dto';
+import { ReorderBannersDto } from './dto/reorder-banners.dto';
+import { UpdateBannerDto } from './dto/update-banner.dto';
 import { Banner } from './entities/banner.entity';
 import { BannerPosition } from './enums/banner-position.enum';
-import { CreateBannerDto } from './dto/create-banner.dto';
-import { UpdateBannerDto } from './dto/update-banner.dto';
-import { ReorderBannersDto } from './dto/reorder-banners.dto';
 
 @Injectable()
 export class BannersService {
@@ -31,14 +31,8 @@ export class BannersService {
     const qb = this.bannerRepo
       .createQueryBuilder('b')
       .where('b.isActive = :active', { active: true })
-      .andWhere(
-        '(b.startsAt IS NULL OR b.startsAt <= :now)',
-        { now },
-      )
-      .andWhere(
-        '(b.endsAt IS NULL OR b.endsAt >= :now)',
-        { now },
-      )
+      .andWhere('(b.startsAt IS NULL OR b.startsAt <= :now)', { now })
+      .andWhere('(b.endsAt IS NULL OR b.endsAt >= :now)', { now })
       .orderBy('b.sortOrder', 'ASC')
       .addOrderBy('b.createdAt', 'DESC');
 
@@ -113,10 +107,18 @@ export class BannersService {
 
     const cleanups: Promise<void>[] = [];
     if (banner.imagePublicId) {
-      cleanups.push(this.mediaService.delete(banner.imagePublicId).catch(() => null) as Promise<void>);
+      cleanups.push(
+        this.mediaService
+          .delete(banner.imagePublicId)
+          .catch(() => null) as Promise<void>,
+      );
     }
     if (banner.imageMobilePublicId) {
-      cleanups.push(this.mediaService.delete(banner.imageMobilePublicId).catch(() => null) as Promise<void>);
+      cleanups.push(
+        this.mediaService
+          .delete(banner.imageMobilePublicId)
+          .catch(() => null) as Promise<void>,
+      );
     }
     await Promise.all(cleanups);
 

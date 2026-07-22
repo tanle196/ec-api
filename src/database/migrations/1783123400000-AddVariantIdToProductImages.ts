@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddVariantIdToProductImages1783123400000
-  implements MigrationInterface
-{
+export class AddVariantIdToProductImages1783123400000 implements MigrationInterface {
   name = 'AddVariantIdToProductImages1783123400000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
