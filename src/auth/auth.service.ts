@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -24,6 +25,8 @@ const ADMIN_ROLES = ['super-admin', 'admin'];
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly configService: TypedConfigService,
     private readonly jwtService: JwtService,
@@ -273,10 +276,7 @@ export class AuthService {
             verificationTokenExpires: expires,
             passwordHash,
           });
-          void this.mailService.sendVerificationEmail(
-            email,
-            this.buildVerifyUrl(token),
-          );
+          void this.notifyVerificationEmail(email, token);
         }
 
         return {
@@ -308,10 +308,7 @@ export class AuthService {
         );
       });
 
-      void this.mailService.sendVerificationEmail(
-        email,
-        this.buildVerifyUrl(token),
-      );
+      void this.notifyVerificationEmail(email, token);
 
       return {
         message:
@@ -342,6 +339,23 @@ export class AuthService {
   private buildVerifyUrl(token: string): string {
     const { appDomain } = this.configService.getAppConfig();
     return `${appDomain}/verify-email?token=${token}`;
+  }
+
+  private async notifyVerificationEmail(
+    email: string,
+    token: string,
+  ): Promise<void> {
+    try {
+      await this.mailService.sendVerificationEmail(
+        email,
+        this.buildVerifyUrl(token),
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to send verification email to ${email}`,
+        error instanceof Error ? error.stack : error,
+      );
+    }
   }
 
   async activeAccount(token: string): Promise<UserInformationResponseDto> {

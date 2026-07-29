@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -60,6 +61,8 @@ const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectRepository(Order)
     private readonly orderRepo: Repository<Order>,
@@ -654,20 +657,27 @@ export class OrdersService {
     const user = await this.usersService.findById(order.user_id);
     if (!user) return;
 
-    await this.mailService.sendOrderConfirmation(user.email, {
-      orderNumber: order.orderNumber,
-      items: order.items.map((item) => ({
-        productName: item.productName,
-        variantName: item.variantName,
-        quantity: item.quantity,
-        unitPrice: Number(item.unitPrice),
-        total: Number(item.total),
-      })),
-      subtotal: Number(order.subtotal),
-      shippingFee: Number(order.shippingFee),
-      discount: Number(order.discount),
-      total: Number(order.total),
-    });
+    try {
+      await this.mailService.sendOrderConfirmation(user.email, {
+        orderNumber: order.orderNumber,
+        items: order.items.map((item) => ({
+          productName: item.productName,
+          variantName: item.variantName,
+          quantity: item.quantity,
+          unitPrice: Number(item.unitPrice),
+          total: Number(item.total),
+        })),
+        subtotal: Number(order.subtotal),
+        shippingFee: Number(order.shippingFee),
+        discount: Number(order.discount),
+        total: Number(order.total),
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to send order confirmation email for order ${order.orderNumber}`,
+        error instanceof Error ? error.stack : error,
+      );
+    }
   }
 
   private async notifyOrderStatusUpdate(
@@ -677,11 +687,18 @@ export class OrdersService {
     const user = await this.usersService.findById(order.user_id);
     if (!user) return;
 
-    await this.mailService.sendOrderStatusUpdate(user.email, {
-      orderNumber: order.orderNumber,
-      fromStatus,
-      toStatus: order.status,
-    });
+    try {
+      await this.mailService.sendOrderStatusUpdate(user.email, {
+        orderNumber: order.orderNumber,
+        fromStatus,
+        toStatus: order.status,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to send order status update email for order ${order.orderNumber}`,
+        error instanceof Error ? error.stack : error,
+      );
+    }
   }
 
   private generateOrderNumber(): string {
