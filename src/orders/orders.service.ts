@@ -292,7 +292,7 @@ export class OrdersService {
       actorId: params.userId,
     });
 
-    return this.findOne(savedOrder.id);
+    return this.findOrderOrThrow(manager, savedOrder.id);
   }
 
   async findAll(
@@ -349,13 +349,27 @@ export class OrdersService {
     return { data, total, page, limit };
   }
 
-  async findOne(id: string, userId?: string): Promise<Order> {
-    const order = await this.orderRepo.findOne({
+  // Centralizes the standard relations + not-found check so every read site
+  // (including transactional ones) stays consistent. Callers inside a
+  // `dataSource.transaction` MUST pass that transaction's manager here
+  // instead of `this.orderRepo` — a separate connection can't see the
+  // transaction's uncommitted writes and would throw NotFoundException.
+  private async findOrderOrThrow(
+    manager: EntityManager,
+    id: string,
+  ): Promise<Order> {
+    const order = await manager.findOne(Order, {
       where: { id },
       relations: ['items', 'address', 'discounts'],
     });
 
     if (!order) throw new NotFoundException('Order not found');
+    return order;
+  }
+
+  async findOne(id: string, userId?: string): Promise<Order> {
+    const order = await this.findOrderOrThrow(this.orderRepo.manager, id);
+
     if (userId && order.user_id !== userId) throw new ForbiddenException();
 
     return order;
@@ -456,15 +470,7 @@ export class OrdersService {
         total: order.total,
       });
 
-      // Read back through the transactional manager, not `this.orderRepo`
-      // (a separate connection) — the latter can't see this transaction's
-      // uncommitted writes and would return pre-edit data.
-      const updated = await manager.findOne(Order, {
-        where: { id: order.id },
-        relations: ['items', 'address', 'discounts'],
-      });
-      if (!updated) throw new NotFoundException('Order not found');
-      return updated;
+      return this.findOrderOrThrow(manager, order.id);
     });
   }
 
@@ -493,7 +499,7 @@ export class OrdersService {
         actorId: userId,
       });
 
-      return this.findOne(order.id);
+      return this.findOrderOrThrow(manager, order.id);
     });
 
     void this.notifyOrderStatusUpdate(updated, fromStatus);
@@ -534,7 +540,7 @@ export class OrdersService {
         note: dto.note,
       });
 
-      return this.findOne(order.id);
+      return this.findOrderOrThrow(manager, order.id);
     });
 
     void this.notifyOrderStatusUpdate(updated, fromStatus);
