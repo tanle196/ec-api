@@ -32,6 +32,12 @@ const USERS: UserSeedData[] = [
     password: 'Member@123',
     roleName: 'member',
   },
+  {
+    email: 'letutan500@gmail.com',
+    fullName: 'Letutan',
+    password: 'Member@123',
+    roleName: 'member',
+  },
 ];
 
 export async function seedUsers(

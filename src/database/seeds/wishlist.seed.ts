@@ -18,6 +18,10 @@ const WISHLISTS: WishlistSeedData[] = [
   // admin@example.com wishlist
   { userEmail: 'admin@example.com', variantSku: 'IPH-15-PRO-BLK-256' },
   { userEmail: 'admin@example.com', variantSku: 'POLO-MEN-WHT-M' },
+
+  // letutan500@gmail.com wishlist
+  { userEmail: 'letutan500@gmail.com', variantSku: 'LAMP-LED-BLK' },
+  { userEmail: 'letutan500@gmail.com', variantSku: 'MBA-M3-STR-8-256' },
 ];
 
 export async function seedWishlists(dataSource: DataSource): Promise<void> {

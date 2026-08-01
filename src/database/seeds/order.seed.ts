@@ -68,6 +68,21 @@ const ORDERS: OrderSeedData[] = [
     items: [{ variantSku: 'MBA-M3-STR-8-256', quantity: 1 }],
     createdDaysAgo: 3,
   },
+  {
+    userEmail: 'letutan500@gmail.com',
+    addressLine1: '88 Đường Trần Phú',
+    status: OrderStatus.DELIVERED,
+    items: [{ variantSku: 'IPH-15-PRO-WHT-256', quantity: 1 }],
+    notes: 'Giao giờ hành chính',
+    createdDaysAgo: 15,
+  },
+  {
+    userEmail: 'letutan500@gmail.com',
+    addressLine1: '88 Đường Trần Phú',
+    status: OrderStatus.PENDING,
+    items: [{ variantSku: 'MBA-M3-MID-16-512', quantity: 1 }],
+    createdDaysAgo: 2,
+  },
 ];
 
 function generateOrderNumber(daysAgo: number): string {

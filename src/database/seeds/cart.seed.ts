@@ -26,6 +26,13 @@ const CARTS: CartSeedData[] = [
     userEmail: 'admin@example.com',
     items: [{ variantSku: 'MBA-M3-MID-8-256', quantity: 1 }],
   },
+  {
+    userEmail: 'letutan500@gmail.com',
+    items: [
+      { variantSku: 'LAMP-LED-BLK', quantity: 1 },
+      { variantSku: 'POLO-MEN-BLK-M', quantity: 1 },
+    ],
+  },
 ];
 
 export async function seedCarts(dataSource: DataSource): Promise<void> {

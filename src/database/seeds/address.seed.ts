@@ -48,6 +48,18 @@ const ADDRESS_BY_EMAIL: Record<string, AddressSeedData[]> = {
       isDefault: true,
     },
   ],
+  'letutan500@gmail.com': [
+    {
+      fullName: 'Letutan',
+      phone: '0909876543',
+      addressLine1: '88 Đường Trần Phú',
+      addressLine2: 'Phường Hải Châu',
+      city: 'Đà Nẵng',
+      province: 'Đà Nẵng',
+      postalCode: '550000',
+      isDefault: true,
+    },
+  ],
 };
 
 export async function seedAddresses(dataSource: DataSource): Promise<void> {

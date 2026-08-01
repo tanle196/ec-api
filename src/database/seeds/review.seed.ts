@@ -56,6 +56,16 @@ const REVIEWS: ReviewSeedData[] = [
       'Đèn sáng vừa phải, cảm ứng đôi khi hơi nhạy. Giá tầm trung thì chấp nhận được.',
     isApproved: false,
   },
+  // letutan500@gmail.com — đã mua iPhone 15 Pro trắng (DELIVERED) → isVerified = true
+  {
+    userEmail: 'letutan500@gmail.com',
+    variantSku: 'IPH-15-PRO-WHT-256',
+    rating: 5,
+    title: 'Đáng đồng tiền',
+    content:
+      'Máy mượt, giao hàng đúng hẹn. Màu trắng nhìn sang, đóng gói cẩn thận.',
+    isApproved: true,
+  },
 ];
 
 async function isVerifiedPurchase(
