@@ -24,6 +24,12 @@ export interface OrderStatusUpdateDetails {
   toStatus: string;
 }
 
+export interface RefundRequestDetails {
+  reason: string;
+  amount: number;
+  adminNote?: string;
+}
+
 @Injectable()
 export class MailService {
   constructor(private readonly mailerService: MailerService) {}
@@ -92,6 +98,59 @@ export class MailService {
         orderNumber: order.orderNumber,
         fromStatus: order.fromStatus,
         toStatus: order.toStatus,
+        year: new Date().getFullYear().toString(),
+      },
+    });
+  }
+
+  async sendRefundRequestReceived(
+    email: string,
+    details: RefundRequestDetails,
+  ): Promise<void> {
+    await this.mailerService.sendMail({
+      to: email,
+      subject: 'We received your refund request',
+      template: './refund-request-received',
+      context: {
+        email,
+        reason: details.reason,
+        amount: details.amount.toFixed(2),
+        year: new Date().getFullYear().toString(),
+      },
+    });
+  }
+
+  async sendRefundRequestApproved(
+    email: string,
+    details: RefundRequestDetails,
+  ): Promise<void> {
+    await this.mailerService.sendMail({
+      to: email,
+      subject: 'Your refund request has been approved',
+      template: './refund-request-approved',
+      context: {
+        email,
+        reason: details.reason,
+        amount: details.amount.toFixed(2),
+        adminNote: details.adminNote,
+        year: new Date().getFullYear().toString(),
+      },
+    });
+  }
+
+  async sendRefundRequestRejected(
+    email: string,
+    details: RefundRequestDetails,
+  ): Promise<void> {
+    await this.mailerService.sendMail({
+      to: email,
+      subject: 'Your refund request has been rejected',
+      template: './refund-request-rejected',
+      context: {
+        email,
+        reason: details.reason,
+        amount: details.amount.toFixed(2),
+        adminNote: details.adminNote,
         year: new Date().getFullYear().toString(),
       },
     });

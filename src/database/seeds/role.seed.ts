@@ -44,6 +44,9 @@ const ROLES: RoleSeedData[] = [
       // payments
       { module: 'payment', action: 'read' },
       { module: 'payment', action: 'update' },
+      // refund requests
+      { module: 'refund', action: 'read' },
+      { module: 'refund', action: 'update' },
       // reviews
       { module: 'review', action: 'read' },
       { module: 'review', action: 'update' },

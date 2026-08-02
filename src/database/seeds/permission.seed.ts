@@ -150,6 +150,20 @@ const PERMISSIONS: Pick<
     isSystem: true,
   },
 
+  // refund requests
+  {
+    module: 'refund',
+    action: PermissionAction.READ,
+    description: 'Xem danh sách yêu cầu hoàn tiền',
+    isSystem: true,
+  },
+  {
+    module: 'refund',
+    action: PermissionAction.UPDATE,
+    description: 'Duyệt / từ chối yêu cầu hoàn tiền',
+    isSystem: true,
+  },
+
   // reviews
   {
     module: 'review',

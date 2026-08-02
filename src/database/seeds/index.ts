@@ -9,6 +9,7 @@ import { seedAddresses } from './address.seed';
 import { seedOrders } from './order.seed';
 import { seedPayments } from './payment.seed';
 import { seedRefunds } from './refund.seed';
+import { seedRefundRequests } from './refund-request.seed';
 import { seedCarts } from './cart.seed';
 import { seedReviews } from './review.seed';
 import { seedWishlists } from './wishlist.seed';
@@ -47,6 +48,9 @@ async function main() {
 
     console.log('\n--- Seeding refunds ---');
     await seedRefunds(AppDataSource);
+
+    console.log('\n--- Seeding refund requests ---');
+    await seedRefundRequests(AppDataSource);
 
     console.log('\n--- Seeding carts ---');
     await seedCarts(AppDataSource);

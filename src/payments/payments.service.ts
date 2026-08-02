@@ -305,11 +305,22 @@ export class PaymentsService {
     return 'processed';
   }
 
-  async createRefund(
+  /**
+   * Validates that the requested items are refundable (not exceeding the
+   * order item's remaining quantity or the payment's remaining balance) and
+   * computes the resulting refund amount. `extraReservedQtyByItem` lets
+   * callers (e.g. refund requests awaiting approval) fold in quantities that
+   * aren't refunded yet but shouldn't be double-committed either.
+   */
+  async resolveRefundableItems(
     paymentId: string,
-    dto: CreateRefundDto,
-    actorId?: string,
-  ): Promise<Refund> {
+    items: { order_item_id: string; quantity: number }[],
+    extraReservedQtyByItem?: Map<string, number>,
+  ): Promise<{
+    payment: Payment;
+    itemsToCreate: Partial<RefundItem>[];
+    amount: number;
+  }> {
     const payment = await this.paymentRepo.findOne({
       where: { id: paymentId },
       relations: ['order', 'order.items'],
@@ -330,7 +341,7 @@ export class PaymentsService {
     );
 
     const requestedItemIds = new Set<string>();
-    for (const reqItem of dto.items) {
+    for (const reqItem of items) {
       if (requestedItemIds.has(reqItem.order_item_id)) {
         throw new BadRequestException(
           `Order item ${reqItem.order_item_id} is listed more than once`,
@@ -344,7 +355,7 @@ export class PaymentsService {
     let amount = 0;
     const itemsToCreate: Partial<RefundItem>[] = [];
 
-    for (const reqItem of dto.items) {
+    for (const reqItem of items) {
       const orderItem = orderItemsById.get(reqItem.order_item_id);
       if (!orderItem) {
         throw new BadRequestException(
@@ -353,7 +364,9 @@ export class PaymentsService {
       }
 
       const alreadyRefundedQty = refundedQtyByItem.get(orderItem.id) ?? 0;
-      const refundableQty = orderItem.quantity - alreadyRefundedQty;
+      const reservedQty = extraReservedQtyByItem?.get(orderItem.id) ?? 0;
+      const refundableQty =
+        orderItem.quantity - alreadyRefundedQty - reservedQty;
       if (reqItem.quantity > refundableQty) {
         throw new BadRequestException(
           `Cannot refund ${reqItem.quantity} of "${orderItem.productName}" — only ${refundableQty} left refundable`,
@@ -376,6 +389,19 @@ export class PaymentsService {
         'Refund amount exceeds the remaining refundable balance',
       );
     }
+
+    return { payment, itemsToCreate, amount };
+  }
+
+  async createRefund(
+    paymentId: string,
+    dto: CreateRefundDto,
+    actorId?: string,
+  ): Promise<Refund> {
+    const { payment, itemsToCreate, amount } =
+      await this.resolveRefundableItems(paymentId, dto.items);
+
+    const alreadyRefundedTotal = await this.sumSucceededRefundAmount(paymentId);
 
     const refund = await this.refundRepo.save(
       this.refundRepo.create({
