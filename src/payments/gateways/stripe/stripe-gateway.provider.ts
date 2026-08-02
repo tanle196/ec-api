@@ -25,10 +25,15 @@ export class StripeGatewayProvider implements PaymentGatewayProvider {
   ): Promise<PaymentInitiationResult> {
     const stripeConfig = this.config.getStripeConfig();
 
+    const successUrl = new URL(stripeConfig.checkoutSuccessUrl);
+    successUrl.searchParams.set('order_id', order.id);
+    const cancelUrl = new URL(stripeConfig.checkoutCancelUrl);
+    cancelUrl.searchParams.set('order_id', order.id);
+
     const session = await this.stripeClient.client.checkout.sessions.create({
       mode: 'payment',
-      success_url: stripeConfig.checkoutSuccessUrl,
-      cancel_url: stripeConfig.checkoutCancelUrl,
+      success_url: successUrl.toString(),
+      cancel_url: cancelUrl.toString(),
       metadata: {
         payment_id: payment.id,
         order_id: order.id,
