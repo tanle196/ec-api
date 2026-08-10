@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, Repository } from 'typeorm';
+import { EntityManager, ILike, Repository } from 'typeorm';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { CreateDiscountDto } from './dto/create-discount.dto';
 import { DiscountListQueryDto } from './dto/discount-list-query.dto';
@@ -142,7 +142,28 @@ export class DiscountsService {
     return Math.min(Math.round(Number(discount.value)), subtotal);
   }
 
-  async incrementUsedCount(id: string): Promise<void> {
-    await this.discountRepo.increment({ id }, 'usedCount', 1);
+  /**
+   * Atomically increments usedCount, re-checking the usage limit in the same
+   * conditional UPDATE so concurrent orders can't both pass `resolveCode`'s
+   * earlier check and both increment past the limit. Must be called with the
+   * order's transactional `manager` so the increment rolls back together
+   * with the rest of the order if a later step in the transaction fails.
+   */
+  async incrementUsedCount(manager: EntityManager, id: string): Promise<void> {
+    const result = await manager
+      .createQueryBuilder()
+      .update(Discount)
+      .set({ usedCount: () => '"usedCount" + 1' })
+      .where(
+        'id = :id AND ("usageLimit" IS NULL OR "usedCount" < "usageLimit")',
+        { id },
+      )
+      .execute();
+
+    if (result.affected === 0) {
+      throw new BadRequestException(
+        'Discount code has reached its usage limit',
+      );
+    }
   }
 }

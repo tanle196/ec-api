@@ -280,7 +280,10 @@ export class OrdersService {
         `INSERT INTO "order_discount" ("order_id", "discount_id") VALUES ($1, $2)`,
         [savedOrder.id, params.discountId],
       );
-      await this.discountsService.incrementUsedCount(params.discountId);
+      await this.discountsService.incrementUsedCount(
+        manager,
+        params.discountId,
+      );
     }
 
     if (params.cartId) {
