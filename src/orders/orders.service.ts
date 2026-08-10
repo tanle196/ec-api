@@ -229,26 +229,15 @@ export class OrdersService {
       cartId?: string;
     },
   ): Promise<Order> {
-    for (const item of params.resolvedItems) {
-      // Atomic conditional decrement: only succeeds if enough stock remains,
-      // preventing oversell when concurrent orders race on the same variant.
-      const updateResult = await manager
-        .createQueryBuilder()
-        .update(ProductVariant)
-        .set({ stock: () => 'stock - :qty' })
-        .where('id = :id AND stock >= :qty', {
-          id: item.variant_id,
-          qty: item.quantity,
-        })
-        .execute();
-
-      if (updateResult.affected === 0) {
-        const sku =
-          params.variantMap.get(item.variant_id)?.sku ?? item.variant_id;
-        throw new UnprocessableEntityException(
-          `Insufficient stock for variant ${sku}`,
-        );
-      }
+    // Sort by variant_id before locking so concurrent orders that share
+    // variants always acquire row locks in the same order, avoiding a
+    // classic lock-order deadlock (order A locks X then waits on Y while
+    // order B locks Y then waits on X).
+    const itemsToLock = [...params.resolvedItems].sort((a, b) =>
+      a.variant_id.localeCompare(b.variant_id),
+    );
+    for (const item of itemsToLock) {
+      await this.decrementStock(manager, item, params.variantMap);
     }
 
     const shippingFee = this.configService.getAppConfig().shippingFlatFee;
@@ -413,23 +402,14 @@ export class OrdersService {
         const { subtotal, resolvedItems, variantMap } =
           await this.resolveOrderItems(dto.items);
 
-        for (const item of resolvedItems) {
-          const updateResult = await manager
-            .createQueryBuilder()
-            .update(ProductVariant)
-            .set({ stock: () => 'stock - :qty' })
-            .where('id = :id AND stock >= :qty', {
-              id: item.variant_id,
-              qty: item.quantity,
-            })
-            .execute();
-
-          if (updateResult.affected === 0) {
-            const sku = variantMap.get(item.variant_id)?.sku ?? item.variant_id;
-            throw new UnprocessableEntityException(
-              `Insufficient stock for variant ${sku}`,
-            );
-          }
+        // Sort by variant_id before locking so concurrent orders that share
+        // variants always acquire row locks in the same order, avoiding a
+        // lock-order deadlock (see persistOrder for details).
+        const itemsToLock = [...resolvedItems].sort((a, b) =>
+          a.variant_id.localeCompare(b.variant_id),
+        );
+        for (const item of itemsToLock) {
+          await this.decrementStock(manager, item, variantMap);
         }
 
         let discountAmount = 0;
@@ -636,6 +616,42 @@ export class OrdersService {
     );
   }
 
+  // Atomic conditional decrement: only succeeds if enough stock remains AND
+  // the variant is still active, preventing oversell and closing the race
+  // where a variant is deactivated after `resolveOrderItems` read it but
+  // before this transaction commits.
+  private async decrementStock(
+    manager: EntityManager,
+    item: ResolvedOrderItem,
+    variantMap: Map<string, ProductVariant>,
+  ): Promise<void> {
+    const updateResult = await manager
+      .createQueryBuilder()
+      .update(ProductVariant)
+      .set({ stock: () => 'stock - :qty' })
+      .where('id = :id AND stock >= :qty AND "isActive" = true', {
+        id: item.variant_id,
+        qty: item.quantity,
+      })
+      .execute();
+
+    if (updateResult.affected === 0) {
+      const sku = variantMap.get(item.variant_id)?.sku ?? item.variant_id;
+      const current = await manager.findOne(ProductVariant, {
+        where: { id: item.variant_id },
+      });
+
+      if (current && !current.isActive) {
+        throw new UnprocessableEntityException(
+          `Variant ${sku} is no longer available`,
+        );
+      }
+      throw new UnprocessableEntityException(
+        `Insufficient stock for variant ${sku}`,
+      );
+    }
+  }
+
   private async restoreStock(
     order: Order,
     manager: EntityManager,
@@ -657,10 +673,10 @@ export class OrdersService {
   }
 
   private async notifyOrderConfirmation(order: Order): Promise<void> {
-    const user = await this.usersService.findById(order.user_id);
-    if (!user) return;
-
     try {
+      const user = await this.usersService.findById(order.user_id);
+      if (!user) return;
+
       await this.mailService.sendOrderConfirmation(user.email, {
         orderNumber: order.orderNumber,
         items: order.items.map((item) => ({
@@ -677,7 +693,7 @@ export class OrdersService {
       });
     } catch (error) {
       this.logger.error(
-        `Failed to send order confirmation email for order ${order.orderNumber}`,
+        `Failed to notify order confirmation for order ${order.orderNumber}`,
         error instanceof Error ? error.stack : error,
       );
     }
@@ -687,10 +703,10 @@ export class OrdersService {
     order: Order,
     fromStatus: OrderStatus | null,
   ): Promise<void> {
-    const user = await this.usersService.findById(order.user_id);
-    if (!user) return;
-
     try {
+      const user = await this.usersService.findById(order.user_id);
+      if (!user) return;
+
       await this.mailService.sendOrderStatusUpdate(user.email, {
         orderNumber: order.orderNumber,
         fromStatus,
@@ -698,7 +714,7 @@ export class OrdersService {
       });
     } catch (error) {
       this.logger.error(
-        `Failed to send order status update email for order ${order.orderNumber}`,
+        `Failed to notify order status update for order ${order.orderNumber}`,
         error instanceof Error ? error.stack : error,
       );
     }
