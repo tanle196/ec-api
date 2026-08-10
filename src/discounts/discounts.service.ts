@@ -6,7 +6,9 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, ILike, Repository } from 'typeorm';
+import Big from 'big.js';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { MONEY_DECIMAL_PLACES } from '@/common/utils/money.util';
 import { CreateDiscountDto } from './dto/create-discount.dto';
 import { DiscountListQueryDto } from './dto/discount-list-query.dto';
 import { UpdateDiscountDto } from './dto/update-discount.dto';
@@ -137,9 +139,16 @@ export class DiscountsService {
 
   computeAmount(discount: Discount, subtotal: number): number {
     if (discount.type === DiscountType.PERCENT) {
-      return Math.round((subtotal * Number(discount.value)) / 100);
+      return new Big(subtotal)
+        .times(Number(discount.value))
+        .div(100)
+        .round(MONEY_DECIMAL_PLACES)
+        .toNumber();
     }
-    return Math.min(Math.round(Number(discount.value)), subtotal);
+    return Math.min(
+      new Big(Number(discount.value)).round(MONEY_DECIMAL_PLACES).toNumber(),
+      subtotal,
+    );
   }
 
   /**

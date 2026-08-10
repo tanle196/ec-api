@@ -7,13 +7,20 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  QueryFailedError,
+  Repository,
+} from 'typeorm';
+import Big from 'big.js';
 import { Address } from '@/addresses/entities/address.entity';
 import { ProductVariant } from '@/products/entities/product-variant.entity';
 import { DiscountsService } from '@/discounts/discounts.service';
 import { CartsService } from '@/carts/carts.service';
 import { CartItem } from '@/carts/entities/cart-item.entity';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { MONEY_DECIMAL_PLACES } from '@/common/utils/money.util';
 import { TypedConfigService } from '@/config/TypedConfigService';
 import { MailService } from '@/mail/mail.service';
 import { UsersService } from '@/users/users.service';
@@ -81,13 +88,17 @@ export class OrdersService {
   ) {}
 
   async create(userId: string, dto: CreateOrderDto): Promise<Order> {
-    const address = await this.addressRepo.findOne({
-      where: { id: dto.address_id, user_id: userId },
-    });
+    // Address lookup and item resolution are independent reads, so run them
+    // concurrently instead of paying their latency back-to-back.
+    const [address, { subtotal, resolvedItems, variantMap }] =
+      await Promise.all([
+        this.addressRepo.findOne({
+          where: { id: dto.address_id, user_id: userId },
+        }),
+        this.resolveOrderItems(dto.items),
+      ]);
     if (!address) throw new NotFoundException('Address not found');
 
-    const { subtotal, resolvedItems, variantMap } =
-      await this.resolveOrderItems(dto.items);
     const { discountAmount, discountId } = await this.resolveDiscount(
       dto.discountCode,
       subtotal,
@@ -112,12 +123,16 @@ export class OrdersService {
   }
 
   async checkout(userId: string, dto: CheckoutDto): Promise<Order> {
-    const address = await this.addressRepo.findOne({
-      where: { id: dto.address_id, user_id: userId },
-    });
+    // Address lookup and cart fetch are independent reads, so run them
+    // concurrently instead of paying their latency back-to-back.
+    const [address, cart] = await Promise.all([
+      this.addressRepo.findOne({
+        where: { id: dto.address_id, user_id: userId },
+      }),
+      this.cartsService.getCart(userId),
+    ]);
     if (!address) throw new NotFoundException('Address not found');
 
-    const cart = await this.cartsService.getCart(userId);
     if (!cart.items.length) {
       throw new BadRequestException('Cart is empty');
     }
@@ -168,7 +183,12 @@ export class OrdersService {
 
     const variantMap = new Map(variants.map((v) => [v.id, v]));
 
-    let subtotal = 0;
+    // Money is accumulated with Big.js rather than native floats: e.g.
+    // 19.99 * 3 in floating point drifts to 59.96999999999999, which would
+    // eventually surface as an off-by-a-cent total. Big.js parses numbers as
+    // exact decimal digits and does the arithmetic without binary rounding
+    // error, only converting back to a plain number at the boundary.
+    let subtotal = new Big(0);
     const resolvedItems: ResolvedOrderItem[] = [];
 
     for (const item of items) {
@@ -181,8 +201,10 @@ export class OrdersService {
         );
 
       const unitPrice = Number(variant.price);
-      const itemTotal = unitPrice * item.quantity;
-      subtotal += itemTotal;
+      const itemTotal = new Big(unitPrice)
+        .times(item.quantity)
+        .round(MONEY_DECIMAL_PLACES);
+      subtotal = subtotal.plus(itemTotal);
 
       resolvedItems.push({
         variant_id: variant.id,
@@ -190,11 +212,15 @@ export class OrdersService {
         variantName: variant.name,
         unitPrice,
         quantity: item.quantity,
-        total: itemTotal,
+        total: itemTotal.toNumber(),
       });
     }
 
-    return { subtotal, resolvedItems, variantMap };
+    return {
+      subtotal: subtotal.round(MONEY_DECIMAL_PLACES).toNumber(),
+      resolvedItems,
+      variantMap,
+    };
   }
 
   private async resolveDiscount(
@@ -241,12 +267,15 @@ export class OrdersService {
     }
 
     const shippingFee = this.configService.getAppConfig().shippingFlatFee;
-    const total = params.subtotal + shippingFee - params.discountAmount;
+    const total = new Big(params.subtotal)
+      .plus(shippingFee)
+      .minus(params.discountAmount)
+      .round(MONEY_DECIMAL_PLACES)
+      .toNumber();
 
-    const order = manager.create(Order, {
+    const savedOrder = await this.saveOrderWithUniqueNumber(manager, {
       user_id: params.userId,
       address_id: params.addressId,
-      orderNumber: this.generateOrderNumber(),
       status: OrderStatus.PENDING,
       subtotal: params.subtotal,
       shippingFee,
@@ -254,8 +283,6 @@ export class OrdersService {
       total,
       notes: params.notes ?? null,
     });
-
-    const savedOrder = await manager.save(Order, order);
 
     await manager.save(
       OrderItem,
@@ -412,7 +439,7 @@ export class OrdersService {
           await this.decrementStock(manager, item, variantMap);
         }
 
-        let discountAmount = 0;
+        let discountAmount = new Big(0);
         for (const discount of order.discounts) {
           if (
             discount.minOrderValue !== null &&
@@ -422,9 +449,8 @@ export class OrdersService {
               `Order no longer meets the minimum value for discount code "${discount.code}"`,
             );
           }
-          discountAmount += this.discountsService.computeAmount(
-            discount,
-            subtotal,
+          discountAmount = discountAmount.plus(
+            this.discountsService.computeAmount(discount, subtotal),
           );
         }
 
@@ -437,8 +463,12 @@ export class OrdersService {
         );
 
         order.subtotal = subtotal;
-        order.discount = discountAmount;
-        order.total = subtotal + Number(order.shippingFee) - discountAmount;
+        order.discount = discountAmount.round(MONEY_DECIMAL_PLACES).toNumber();
+        order.total = new Big(subtotal)
+          .plus(Number(order.shippingFee))
+          .minus(discountAmount)
+          .round(MONEY_DECIMAL_PLACES)
+          .toNumber();
       }
 
       order.address_id = addressId;
@@ -725,5 +755,59 @@ export class OrdersService {
     const datePart = date.toISOString().slice(0, 10).replace(/-/g, '');
     const random = Math.random().toString(36).slice(2, 8).toUpperCase();
     return `ORD-${datePart}-${random}`;
+  }
+
+  // orderNumber's random suffix makes a collision very unlikely but not
+  // impossible; without a retry it would surface as a raw unique-constraint
+  // DB error instead of either succeeding or failing cleanly. Regenerate and
+  // retry a bounded number of times before giving up.
+  private async saveOrderWithUniqueNumber(
+    manager: EntityManager,
+    fields: {
+      user_id: string;
+      address_id: string;
+      status: OrderStatus;
+      subtotal: number;
+      shippingFee: number;
+      discount: number;
+      total: number;
+      notes: string | null;
+    },
+  ): Promise<Order> {
+    const maxAttempts = 5;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const order = manager.create(Order, {
+        ...fields,
+        orderNumber: this.generateOrderNumber(),
+      });
+
+      try {
+        return await manager.save(Order, order);
+      } catch (error) {
+        if (!this.isOrderNumberCollision(error) || attempt === maxAttempts) {
+          throw error;
+        }
+        this.logger.warn(
+          `Order number collision on attempt ${attempt}, retrying`,
+        );
+      }
+    }
+
+    // Unreachable: the loop above always returns or throws.
+    throw new Error('Failed to generate a unique order number');
+  }
+
+  private isOrderNumberCollision(error: unknown): boolean {
+    if (!(error instanceof QueryFailedError)) return false;
+    const driverError = error as QueryFailedError & {
+      code?: string;
+      detail?: string;
+    };
+    return (
+      driverError.code === '23505' &&
+      typeof driverError.detail === 'string' &&
+      driverError.detail.includes('orderNumber')
+    );
   }
 }

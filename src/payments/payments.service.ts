@@ -6,11 +6,13 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import Big from 'big.js';
 import { Order } from '@/orders/entities/order.entity';
 import { OrderStatus } from '@/orders/enums/order-status.enum';
 import { OrderStatusChangeActor } from '@/orders/enums/order-status-change-actor.enum';
 import { OrdersService } from '@/orders/orders.service';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { MONEY_DECIMAL_PLACES } from '@/common/utils/money.util';
 import { OrderItem } from '@/orders/entities/order-item.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { CreateRefundDto } from './dto/create-refund.dto';
@@ -273,7 +275,10 @@ export class PaymentsService {
     const amountTotal = Number(charge.amount ?? payment.amount);
     const amountRefundedTotal = Number(charge.amount_refunded ?? 0);
     const alreadyRefunded = await this.sumSucceededRefundAmount(paymentId);
-    const newAmount = amountRefundedTotal - alreadyRefunded;
+    const newAmount = new Big(amountRefundedTotal)
+      .minus(alreadyRefunded)
+      .round(MONEY_DECIMAL_PLACES)
+      .toNumber();
     if (newAmount <= 0) return 'already_terminal';
 
     await this.refundRepo.save(
@@ -352,7 +357,7 @@ export class PaymentsService {
 
     const refundedQtyByItem = await this.getRefundedQuantitiesByItem(paymentId);
 
-    let amount = 0;
+    let amount = new Big(0);
     const itemsToCreate: Partial<RefundItem>[] = [];
 
     for (const reqItem of items) {
@@ -373,24 +378,26 @@ export class PaymentsService {
         );
       }
 
-      const itemAmount = Number(orderItem.unitPrice) * reqItem.quantity;
-      amount += itemAmount;
+      const itemAmount = new Big(Number(orderItem.unitPrice))
+        .times(reqItem.quantity)
+        .round(MONEY_DECIMAL_PLACES);
+      amount = amount.plus(itemAmount);
 
       itemsToCreate.push({
         order_item_id: orderItem.id,
         quantity: reqItem.quantity,
-        amount: itemAmount,
+        amount: itemAmount.toNumber(),
       });
     }
 
     const alreadyRefundedTotal = await this.sumSucceededRefundAmount(paymentId);
-    if (alreadyRefundedTotal + amount > Number(payment.amount)) {
+    if (new Big(alreadyRefundedTotal).plus(amount).gt(Number(payment.amount))) {
       throw new BadRequestException(
         'Refund amount exceeds the remaining refundable balance',
       );
     }
 
-    return { payment, itemsToCreate, amount };
+    return { payment, itemsToCreate, amount: amount.toNumber() };
   }
 
   async createRefund(
@@ -434,7 +441,10 @@ export class PaymentsService {
       throw error;
     }
 
-    const totalRefunded = alreadyRefundedTotal + amount;
+    const totalRefunded = new Big(alreadyRefundedTotal)
+      .plus(amount)
+      .round(MONEY_DECIMAL_PLACES)
+      .toNumber();
     payment.status =
       totalRefunded >= Number(payment.amount)
         ? PaymentStatus.REFUNDED
