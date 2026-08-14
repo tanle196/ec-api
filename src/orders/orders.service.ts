@@ -20,7 +20,7 @@ import { DiscountsService } from '@/discounts/discounts.service';
 import { CartsService } from '@/carts/carts.service';
 import { CartItem } from '@/carts/entities/cart-item.entity';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
-import { MONEY_DECIMAL_PLACES } from '@/common/utils/money.util';
+import { MONEY_DECIMAL_PLACES, toMoney } from '@/common/utils/money.util';
 import { TypedConfigService } from '@/config/TypedConfigService';
 import { MailService } from '@/mail/mail.service';
 import { UsersService } from '@/users/users.service';
@@ -88,16 +88,18 @@ export class OrdersService {
   ) {}
 
   async create(userId: string, dto: CreateOrderDto): Promise<Order> {
-    // Address lookup and item resolution are independent reads, so run them
-    // concurrently instead of paying their latency back-to-back.
-    const [address, { subtotal, resolvedItems, variantMap }] =
-      await Promise.all([
-        this.addressRepo.findOne({
-          where: { id: dto.address_id, user_id: userId },
-        }),
-        this.resolveOrderItems(dto.items),
-      ]);
+    // Address is validated first so a bad address_id always fails fast with
+    // a consistent error, regardless of DB latency. Kept sequential (rather
+    // than Promise.all with resolveOrderItems) so the observable error for a
+    // request with both an invalid address and invalid items doesn't depend
+    // on which query happens to settle first.
+    const address = await this.addressRepo.findOne({
+      where: { id: dto.address_id, user_id: userId },
+    });
     if (!address) throw new NotFoundException('Address not found');
+
+    const { subtotal, resolvedItems, variantMap } =
+      await this.resolveOrderItems(dto.items);
 
     const { discountAmount, discountId } = await this.resolveDiscount(
       dto.discountCode,
@@ -123,15 +125,16 @@ export class OrdersService {
   }
 
   async checkout(userId: string, dto: CheckoutDto): Promise<Order> {
-    // Address lookup and cart fetch are independent reads, so run them
-    // concurrently instead of paying their latency back-to-back.
-    const [address, cart] = await Promise.all([
-      this.addressRepo.findOne({
-        where: { id: dto.address_id, user_id: userId },
-      }),
-      this.cartsService.getCart(userId),
-    ]);
+    // Address is validated before fetching the cart. getCart() creates and
+    // persists an empty cart as a side effect when the user has none, so
+    // running it concurrently with the address check would leave stray cart
+    // rows behind for requests that were always going to fail validation.
+    const address = await this.addressRepo.findOne({
+      where: { id: dto.address_id, user_id: userId },
+    });
     if (!address) throw new NotFoundException('Address not found');
+
+    const cart = await this.cartsService.getCart(userId);
 
     if (!cart.items.length) {
       throw new BadRequestException('Cart is empty');
@@ -217,7 +220,7 @@ export class OrdersService {
     }
 
     return {
-      subtotal: subtotal.round(MONEY_DECIMAL_PLACES).toNumber(),
+      subtotal: toMoney(subtotal),
       resolvedItems,
       variantMap,
     };
@@ -267,11 +270,9 @@ export class OrdersService {
     }
 
     const shippingFee = this.configService.getAppConfig().shippingFlatFee;
-    const total = new Big(params.subtotal)
-      .plus(shippingFee)
-      .minus(params.discountAmount)
-      .round(MONEY_DECIMAL_PLACES)
-      .toNumber();
+    const total = toMoney(
+      new Big(params.subtotal).plus(shippingFee).minus(params.discountAmount),
+    );
 
     const savedOrder = await this.saveOrderWithUniqueNumber(manager, {
       user_id: params.userId,
@@ -463,12 +464,12 @@ export class OrdersService {
         );
 
         order.subtotal = subtotal;
-        order.discount = discountAmount.round(MONEY_DECIMAL_PLACES).toNumber();
-        order.total = new Big(subtotal)
-          .plus(Number(order.shippingFee))
-          .minus(discountAmount)
-          .round(MONEY_DECIMAL_PLACES)
-          .toNumber();
+        order.discount = toMoney(discountAmount);
+        order.total = toMoney(
+          new Big(subtotal)
+            .plus(Number(order.shippingFee))
+            .minus(discountAmount),
+        );
       }
 
       order.address_id = addressId;
@@ -783,7 +784,15 @@ export class OrdersService {
       });
 
       try {
-        return await manager.save(Order, order);
+        // Wrapped in a nested transaction so a unique-constraint failure only
+        // rolls back to a SAVEPOINT instead of aborting the whole outer
+        // transaction (Postgres marks the entire transaction as aborted
+        // after any failed statement, which would otherwise make every
+        // subsequent retry attempt fail with "current transaction is
+        // aborted" instead of actually retrying).
+        return await manager.transaction((txManager) =>
+          txManager.save(Order, order),
+        );
       } catch (error) {
         if (!this.isOrderNumberCollision(error) || attempt === maxAttempts) {
           throw error;

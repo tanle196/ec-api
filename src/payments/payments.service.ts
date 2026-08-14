@@ -12,7 +12,7 @@ import { OrderStatus } from '@/orders/enums/order-status.enum';
 import { OrderStatusChangeActor } from '@/orders/enums/order-status-change-actor.enum';
 import { OrdersService } from '@/orders/orders.service';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
-import { MONEY_DECIMAL_PLACES } from '@/common/utils/money.util';
+import { MONEY_DECIMAL_PLACES, toMoney } from '@/common/utils/money.util';
 import { OrderItem } from '@/orders/entities/order-item.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { CreateRefundDto } from './dto/create-refund.dto';
@@ -275,10 +275,9 @@ export class PaymentsService {
     const amountTotal = Number(charge.amount ?? payment.amount);
     const amountRefundedTotal = Number(charge.amount_refunded ?? 0);
     const alreadyRefunded = await this.sumSucceededRefundAmount(paymentId);
-    const newAmount = new Big(amountRefundedTotal)
-      .minus(alreadyRefunded)
-      .round(MONEY_DECIMAL_PLACES)
-      .toNumber();
+    const newAmount = toMoney(
+      new Big(amountRefundedTotal).minus(alreadyRefunded),
+    );
     if (newAmount <= 0) return 'already_terminal';
 
     await this.refundRepo.save(
@@ -441,10 +440,7 @@ export class PaymentsService {
       throw error;
     }
 
-    const totalRefunded = new Big(alreadyRefundedTotal)
-      .plus(amount)
-      .round(MONEY_DECIMAL_PLACES)
-      .toNumber();
+    const totalRefunded = toMoney(new Big(alreadyRefundedTotal).plus(amount));
     payment.status =
       totalRefunded >= Number(payment.amount)
         ? PaymentStatus.REFUNDED
