@@ -5,14 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import Big from 'big.js';
 import { Order } from '@/orders/entities/order.entity';
 import { OrderStatus } from '@/orders/enums/order-status.enum';
 import { OrderStatusChangeActor } from '@/orders/enums/order-status-change-actor.enum';
 import { OrdersService } from '@/orders/orders.service';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
-import { MONEY_DECIMAL_PLACES } from '@/common/utils/money.util';
+import { MONEY_DECIMAL_PLACES, toMoney } from '@/common/utils/money.util';
 import { OrderItem } from '@/orders/entities/order-item.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { CreateRefundDto } from './dto/create-refund.dto';
@@ -24,56 +24,93 @@ import { RefundItem } from './entities/refund-item.entity';
 import { PaymentStatus } from './enums/payment-status.enum';
 import { RefundStatus } from './enums/refund-status.enum';
 import { PaymentGatewayRegistry } from './gateways/payment-gateway.registry';
+import { fromStripeAmount } from './gateways/stripe/stripe-currency.util';
 
 type GatewayEventOutcome = 'processed' | 'already_terminal' | 'not_found';
+
+// Captured from applyStatusChange(..., manager) so the resulting
+// status-change email can be sent after our own transaction has committed,
+// instead of from inside applyStatusChange where it'd risk firing for a
+// change that later rolls back — see applyStatusChange's doc comment.
+type OrderStatusNotify = {
+  order: Order;
+  fromStatus: OrderStatus | null;
+} | null;
+
+// Refunds that are either already confirmed by the gateway (SUCCEEDED) or
+// still awaiting confirmation (PENDING) are both treated as "committed"
+// against the payment's balance/item quantities — a PENDING refund is
+// actively in flight for some request and must not be double-spent by a
+// concurrent one. FAILED refunds release their reservation automatically by
+// being excluded here.
+const COMMITTED_REFUND_STATUSES = [
+  RefundStatus.PENDING,
+  RefundStatus.SUCCEEDED,
+];
 
 @Injectable()
 export class PaymentsService {
   constructor(
     @InjectRepository(Payment)
     private readonly paymentRepo: Repository<Payment>,
-    @InjectRepository(Order)
-    private readonly orderRepo: Repository<Order>,
     @InjectRepository(Refund)
     private readonly refundRepo: Repository<Refund>,
+    private readonly dataSource: DataSource,
     private readonly ordersService: OrdersService,
     private readonly gatewayRegistry: PaymentGatewayRegistry,
   ) {}
 
   async create(userId: string, dto: CreatePaymentDto): Promise<Payment> {
-    const order = await this.orderRepo.findOne({ where: { id: dto.order_id } });
-    if (!order) throw new NotFoundException('Order not found');
-    if (order.user_id !== userId) throw new ForbiddenException();
+    // Lock the order row for the duration of the "any active payment
+    // already exists?" check and the insert that follows, so two concurrent
+    // create() calls for the same order (double-click, retried request)
+    // serialize instead of both reading no active payment and both
+    // inserting one. The gateway call happens after this transaction
+    // commits and releases the lock, so it never holds it during network
+    // I/O.
+    const { payment, order } = await this.dataSource.transaction(
+      async (manager) => {
+        const order = await manager.findOne(Order, {
+          where: { id: dto.order_id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!order) throw new NotFoundException('Order not found');
+        if (order.user_id !== userId) throw new ForbiddenException();
 
-    if (
-      order.status === OrderStatus.CANCELLED ||
-      order.status === OrderStatus.REFUNDED
-    ) {
-      throw new BadRequestException(
-        `Cannot pay for an order with status "${order.status}"`,
-      );
-    }
+        if (
+          order.status === OrderStatus.CANCELLED ||
+          order.status === OrderStatus.REFUNDED
+        ) {
+          throw new BadRequestException(
+            `Cannot pay for an order with status "${order.status}"`,
+          );
+        }
 
-    const existingActive = await this.paymentRepo.findOne({
-      where: [
-        { order_id: dto.order_id, status: PaymentStatus.PENDING },
-        { order_id: dto.order_id, status: PaymentStatus.COMPLETED },
-      ],
-    });
+        const existingActive = await manager.findOne(Payment, {
+          where: [
+            { order_id: dto.order_id, status: PaymentStatus.PENDING },
+            { order_id: dto.order_id, status: PaymentStatus.COMPLETED },
+          ],
+        });
 
-    if (existingActive) {
-      throw new BadRequestException(
-        'An active payment already exists for this order',
-      );
-    }
+        if (existingActive) {
+          throw new BadRequestException(
+            'An active payment already exists for this order',
+          );
+        }
 
-    const payment = await this.paymentRepo.save(
-      this.paymentRepo.create({
-        order_id: dto.order_id,
-        method: dto.method,
-        status: PaymentStatus.PENDING,
-        amount: order.total,
-      }),
+        const payment = await manager.save(
+          Payment,
+          manager.create(Payment, {
+            order_id: dto.order_id,
+            method: dto.method,
+            status: PaymentStatus.PENDING,
+            amount: order.total,
+          }),
+        );
+
+        return { payment, order };
+      },
     );
 
     const provider = this.gatewayRegistry.resolve(dto.method);
@@ -140,53 +177,93 @@ export class PaymentsService {
     dto: UpdatePaymentStatusDto,
     actorId?: string,
   ): Promise<Payment> {
-    const payment = await this.findOne(id);
-
-    if (
-      payment.status === PaymentStatus.COMPLETED ||
-      payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
-      payment.status === PaymentStatus.REFUNDED
-    ) {
+    // partially_refunded is a system-derived status: it's only ever set by
+    // createRefund/refundFromGatewayEvent alongside an actual Refund record
+    // and the matching order sync. Allowing an admin to set it directly here
+    // would leave the payment claiming a partial refund that has no Refund
+    // row behind it, and resolveRefundableItems would still see the full
+    // amount as refundable.
+    if (dto.status === PaymentStatus.PARTIALLY_REFUNDED) {
       throw new BadRequestException(
-        `Cannot update a payment with status "${payment.status}"`,
+        'Status "partially_refunded" is set automatically by the refund flow and cannot be assigned directly',
       );
     }
 
-    payment.status = dto.status;
+    // Locks the payment row so this read-check-write can't interleave with
+    // a concurrent webhook event (completeFromGatewayEvent/
+    // failFromGatewayEvent) touching the same payment, and folds the order
+    // status sync into the same transaction so the two writes commit or
+    // roll back together.
+    const { payment, orderNotify } = await this.dataSource.transaction(
+      async (manager) => {
+        const payment = await manager.findOne(Payment, {
+          where: { id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!payment) throw new NotFoundException('Payment not found');
 
-    if (dto.transactionId !== undefined) {
-      payment.transactionId = dto.transactionId;
-    }
-    if (dto.metadata !== undefined) {
-      payment.metadata = dto.metadata;
-    }
+        if (
+          payment.status === PaymentStatus.COMPLETED ||
+          payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
+          payment.status === PaymentStatus.REFUNDED
+        ) {
+          throw new BadRequestException(
+            `Cannot update a payment with status "${payment.status}"`,
+          );
+        }
 
-    if (dto.status === PaymentStatus.COMPLETED) {
-      payment.paidAt = new Date();
-      await this.ordersService.applyStatusChange(
-        payment.order_id,
-        OrderStatus.CONFIRMED,
-        {
-          actorType: OrderStatusChangeActor.ADMIN,
-          actorId,
-          note: 'Payment completed',
-        },
+        payment.status = dto.status;
+
+        if (dto.transactionId !== undefined) {
+          payment.transactionId = dto.transactionId;
+        }
+        if (dto.metadata !== undefined) {
+          payment.metadata = dto.metadata;
+        }
+
+        let orderNotify: OrderStatusNotify = null;
+
+        if (dto.status === PaymentStatus.COMPLETED) {
+          payment.paidAt = new Date();
+          orderNotify = await this.ordersService.applyStatusChange(
+            payment.order_id,
+            OrderStatus.CONFIRMED,
+            {
+              actorType: OrderStatusChangeActor.ADMIN,
+              actorId,
+              note: 'Payment completed',
+            },
+            manager,
+          );
+        }
+
+        if (dto.status === PaymentStatus.REFUNDED) {
+          orderNotify = await this.ordersService.applyStatusChange(
+            payment.order_id,
+            OrderStatus.REFUNDED,
+            {
+              actorType: OrderStatusChangeActor.ADMIN,
+              actorId,
+              note: 'Payment refunded',
+            },
+            manager,
+          );
+        }
+
+        return { payment: await manager.save(Payment, payment), orderNotify };
+      },
+    );
+
+    // Only fires once the transaction above has actually committed — see
+    // applyStatusChange's doc comment for why this can't happen inline.
+    if (orderNotify) {
+      this.ordersService.notifyOrderStatusChanged(
+        orderNotify.order,
+        orderNotify.fromStatus,
       );
     }
 
-    if (dto.status === PaymentStatus.REFUNDED) {
-      await this.ordersService.applyStatusChange(
-        payment.order_id,
-        OrderStatus.REFUNDED,
-        {
-          actorType: OrderStatusChangeActor.ADMIN,
-          actorId,
-          note: 'Payment refunded',
-        },
-      );
-    }
-
-    return this.paymentRepo.save(payment);
+    return payment;
   }
 
   async completeFromGatewayEvent(
@@ -195,54 +272,84 @@ export class PaymentsService {
     metadata: Record<string, unknown>,
     note: string,
   ): Promise<GatewayEventOutcome> {
-    const payment = await this.paymentRepo.findOne({
-      where: { id: paymentId },
-    });
-    if (!payment) return 'not_found';
-    if (
-      payment.status === PaymentStatus.COMPLETED ||
-      payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
-      payment.status === PaymentStatus.REFUNDED
-    ) {
-      return 'already_terminal';
-    }
+    // Locked read-check-write: Stripe can redeliver or race webhook events,
+    // so without a lock a delayed/duplicate event could interleave with
+    // another one on the same payment (e.g. a stale "failed" event landing
+    // after this "completed" one already committed) and both would read the
+    // same pre-update status and pass the terminal-status check. Folding the
+    // order sync into the same transaction also keeps payment and order
+    // status from diverging if applyStatusChange throws.
+    const { outcome, orderNotify } = await this.dataSource.transaction(
+      async (manager) => {
+        const payment = await manager.findOne(Payment, {
+          where: { id: paymentId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!payment)
+          return { outcome: 'not_found' as const, orderNotify: null };
+        if (
+          payment.status === PaymentStatus.COMPLETED ||
+          payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
+          payment.status === PaymentStatus.REFUNDED
+        ) {
+          return { outcome: 'already_terminal' as const, orderNotify: null };
+        }
 
-    payment.status = PaymentStatus.COMPLETED;
-    payment.transactionId = transactionId;
-    payment.metadata = metadata;
-    payment.paidAt = new Date();
-    await this.paymentRepo.save(payment);
+        payment.status = PaymentStatus.COMPLETED;
+        payment.transactionId = transactionId;
+        payment.metadata = metadata;
+        payment.paidAt = new Date();
+        await manager.save(Payment, payment);
 
-    await this.ordersService.applyStatusChange(
-      payment.order_id,
-      OrderStatus.CONFIRMED,
-      { actorType: OrderStatusChangeActor.SYSTEM, note },
+        const orderNotify = await this.ordersService.applyStatusChange(
+          payment.order_id,
+          OrderStatus.CONFIRMED,
+          { actorType: OrderStatusChangeActor.SYSTEM, note },
+          manager,
+        );
+
+        return { outcome: 'processed' as const, orderNotify };
+      },
     );
 
-    return 'processed';
+    // Only fires once the transaction above has actually committed — see
+    // applyStatusChange's doc comment for why this can't happen inline.
+    if (orderNotify) {
+      this.ordersService.notifyOrderStatusChanged(
+        orderNotify.order,
+        orderNotify.fromStatus,
+      );
+    }
+
+    return outcome;
   }
 
   async failFromGatewayEvent(
     paymentId: string,
     metadata: Record<string, unknown>,
   ): Promise<GatewayEventOutcome> {
-    const payment = await this.paymentRepo.findOne({
-      where: { id: paymentId },
+    // See completeFromGatewayEvent — same locked read-check-write to stay
+    // safe against redelivered/racing webhook events on the same payment.
+    return this.dataSource.transaction(async (manager) => {
+      const payment = await manager.findOne(Payment, {
+        where: { id: paymentId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!payment) return 'not_found';
+      if (
+        payment.status === PaymentStatus.COMPLETED ||
+        payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
+        payment.status === PaymentStatus.REFUNDED
+      ) {
+        return 'already_terminal';
+      }
+
+      payment.status = PaymentStatus.FAILED;
+      payment.metadata = metadata;
+      await manager.save(Payment, payment);
+
+      return 'processed';
     });
-    if (!payment) return 'not_found';
-    if (
-      payment.status === PaymentStatus.COMPLETED ||
-      payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
-      payment.status === PaymentStatus.REFUNDED
-    ) {
-      return 'already_terminal';
-    }
-
-    payment.status = PaymentStatus.FAILED;
-    payment.metadata = metadata;
-    await this.paymentRepo.save(payment);
-
-    return 'processed';
   }
 
   /**
@@ -256,58 +363,103 @@ export class PaymentsService {
     charge: Record<string, unknown>,
     note: string,
   ): Promise<GatewayEventOutcome> {
-    const payment = await this.paymentRepo.findOne({
-      where: { id: paymentId },
-    });
-    if (!payment) return 'not_found';
-    if (payment.status === PaymentStatus.REFUNDED) {
-      return 'already_terminal';
-    }
+    // Locked read-check-write, same reasoning as completeFromGatewayEvent —
+    // also guards against racing/overlapping with createRefund on the same
+    // payment (both ultimately write payment.status and a Refund row).
+    const { outcome, orderNotify } = await this.dataSource.transaction(
+      async (manager) => {
+        const payment = await manager.findOne(Payment, {
+          where: { id: paymentId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!payment) {
+          return { outcome: 'not_found' as const, orderNotify: null };
+        }
+        if (payment.status === PaymentStatus.REFUNDED) {
+          return { outcome: 'already_terminal' as const, orderNotify: null };
+        }
 
-    const latestRefundId = this.extractLatestRefundId(charge);
-    if (latestRefundId) {
-      const alreadyRecorded = await this.refundRepo.findOne({
-        where: { transactionId: latestRefundId },
-      });
-      if (alreadyRecorded) return 'already_terminal';
-    }
+        const latestRefundId = this.extractLatestRefundId(charge);
+        if (latestRefundId) {
+          const alreadyRecorded = await manager.findOne(Refund, {
+            where: { transactionId: latestRefundId },
+          });
+          if (alreadyRecorded) {
+            return { outcome: 'already_terminal' as const, orderNotify: null };
+          }
+        }
 
-    const amountTotal = Number(charge.amount ?? payment.amount);
-    const amountRefundedTotal = Number(charge.amount_refunded ?? 0);
-    const alreadyRefunded = await this.sumSucceededRefundAmount(paymentId);
-    const newAmount = new Big(amountRefundedTotal)
-      .minus(alreadyRefunded)
-      .round(MONEY_DECIMAL_PLACES)
-      .toNumber();
-    if (newAmount <= 0) return 'already_terminal';
+        // charge.amount/amount_refunded are in Stripe's integer
+        // smallest-unit format (e.g. cents), not the app's decimal amounts
+        // — comparing them directly against payment.amount/our own refund
+        // sums (both decimal) would be off by 100x for any non-zero-decimal
+        // currency. Convert using the charge's own currency rather than the
+        // configured default, since that's the currency the charge actually
+        // happened in. The payment.amount fallback is skipped here — it's
+        // already decimal, not a Stripe unit, so it must NOT go through
+        // fromStripeAmount too.
+        const currency =
+          typeof charge.currency === 'string' ? charge.currency : '';
+        const amountTotal =
+          typeof charge.amount === 'number'
+            ? fromStripeAmount(charge.amount, currency)
+            : Number(payment.amount);
+        const amountRefundedTotal = fromStripeAmount(
+          Number(charge.amount_refunded ?? 0),
+          currency,
+        );
+        const alreadyRefunded = await this.sumRefundAmount(manager, paymentId, [
+          RefundStatus.SUCCEEDED,
+        ]);
+        const newAmount = toMoney(
+          new Big(amountRefundedTotal).minus(alreadyRefunded),
+        );
+        if (newAmount <= 0) {
+          return { outcome: 'already_terminal' as const, orderNotify: null };
+        }
 
-    await this.refundRepo.save(
-      this.refundRepo.create({
-        payment_id: payment.id,
-        order_id: payment.order_id,
-        amount: newAmount,
-        reason: note,
-        status: RefundStatus.SUCCEEDED,
-        transactionId: latestRefundId,
-        metadata: charge,
-      }),
+        await manager.save(
+          Refund,
+          manager.create(Refund, {
+            payment_id: payment.id,
+            order_id: payment.order_id,
+            amount: newAmount,
+            reason: note,
+            status: RefundStatus.SUCCEEDED,
+            transactionId: latestRefundId,
+            metadata: charge,
+          }),
+        );
+
+        payment.status =
+          amountRefundedTotal >= amountTotal
+            ? PaymentStatus.REFUNDED
+            : PaymentStatus.PARTIALLY_REFUNDED;
+        await manager.save(Payment, payment);
+
+        const orderNotify = await this.ordersService.applyStatusChange(
+          payment.order_id,
+          payment.status === PaymentStatus.REFUNDED
+            ? OrderStatus.REFUNDED
+            : OrderStatus.PARTIALLY_REFUNDED,
+          { actorType: OrderStatusChangeActor.SYSTEM, note },
+          manager,
+        );
+
+        return { outcome: 'processed' as const, orderNotify };
+      },
     );
 
-    payment.status =
-      amountRefundedTotal >= amountTotal
-        ? PaymentStatus.REFUNDED
-        : PaymentStatus.PARTIALLY_REFUNDED;
-    await this.paymentRepo.save(payment);
+    // Only fires once the transaction above has actually committed — see
+    // applyStatusChange's doc comment for why this can't happen inline.
+    if (orderNotify) {
+      this.ordersService.notifyOrderStatusChanged(
+        orderNotify.order,
+        orderNotify.fromStatus,
+      );
+    }
 
-    await this.ordersService.applyStatusChange(
-      payment.order_id,
-      payment.status === PaymentStatus.REFUNDED
-        ? OrderStatus.REFUNDED
-        : OrderStatus.PARTIALLY_REFUNDED,
-      { actorType: OrderStatusChangeActor.SYSTEM, note },
-    );
-
-    return 'processed';
+    return outcome;
   }
 
   /**
@@ -316,8 +468,15 @@ export class PaymentsService {
    * computes the resulting refund amount. `extraReservedQtyByItem` lets
    * callers (e.g. refund requests awaiting approval) fold in quantities that
    * aren't refunded yet but shouldn't be double-committed either.
+   *
+   * Must be called with a transactional `manager` that already holds (or is
+   * about to take) a pessimistic lock on the payment row — see the lock
+   * acquired just above each call site. Without that lock, two concurrent
+   * callers could both read the same "already committed" total/quantities
+   * before either writes its own refund, and both would pass this check.
    */
   async resolveRefundableItems(
+    manager: EntityManager,
     paymentId: string,
     items: { order_item_id: string; quantity: number }[],
     extraReservedQtyByItem?: Map<string, number>,
@@ -326,7 +485,7 @@ export class PaymentsService {
     itemsToCreate: Partial<RefundItem>[];
     amount: number;
   }> {
-    const payment = await this.paymentRepo.findOne({
+    const payment = await manager.findOne(Payment, {
       where: { id: paymentId },
       relations: ['order', 'order.items'],
     });
@@ -355,7 +514,11 @@ export class PaymentsService {
       requestedItemIds.add(reqItem.order_item_id);
     }
 
-    const refundedQtyByItem = await this.getRefundedQuantitiesByItem(paymentId);
+    const committedQtyByItem = await this.getRefundQuantitiesByItem(
+      manager,
+      paymentId,
+      COMMITTED_REFUND_STATUSES,
+    );
 
     let amount = new Big(0);
     const itemsToCreate: Partial<RefundItem>[] = [];
@@ -368,10 +531,9 @@ export class PaymentsService {
         );
       }
 
-      const alreadyRefundedQty = refundedQtyByItem.get(orderItem.id) ?? 0;
+      const committedQty = committedQtyByItem.get(orderItem.id) ?? 0;
       const reservedQty = extraReservedQtyByItem?.get(orderItem.id) ?? 0;
-      const refundableQty =
-        orderItem.quantity - alreadyRefundedQty - reservedQty;
+      const refundableQty = orderItem.quantity - committedQty - reservedQty;
       if (reqItem.quantity > refundableQty) {
         throw new BadRequestException(
           `Cannot refund ${reqItem.quantity} of "${orderItem.productName}" — only ${refundableQty} left refundable`,
@@ -390,8 +552,12 @@ export class PaymentsService {
       });
     }
 
-    const alreadyRefundedTotal = await this.sumSucceededRefundAmount(paymentId);
-    if (new Big(alreadyRefundedTotal).plus(amount).gt(Number(payment.amount))) {
+    const committedTotal = await this.sumRefundAmount(
+      manager,
+      paymentId,
+      COMMITTED_REFUND_STATUSES,
+    );
+    if (new Big(committedTotal).plus(amount).gt(Number(payment.amount))) {
       throw new BadRequestException(
         'Refund amount exceeds the remaining refundable balance',
       );
@@ -405,25 +571,42 @@ export class PaymentsService {
     dto: CreateRefundDto,
     actorId?: string,
   ): Promise<Refund> {
-    const { payment, itemsToCreate, amount } =
-      await this.resolveRefundableItems(paymentId, dto.items);
+    // Phase 1 — validate + reserve. Locks the payment row for the balance/
+    // quantity check and the PENDING refund insert, so a concurrent
+    // createRefund/refund-request approval for the same payment can't
+    // interleave and both pass the same balance check. The lock is released
+    // as soon as this transaction commits, before the (potentially slow)
+    // gateway call below.
+    const { refund, payment, amount } = await this.dataSource.transaction(
+      async (manager) => {
+        await manager.findOne(Payment, {
+          where: { id: paymentId },
+          lock: { mode: 'pessimistic_write' },
+        });
 
-    const alreadyRefundedTotal = await this.sumSucceededRefundAmount(paymentId);
+        const { payment, itemsToCreate, amount } =
+          await this.resolveRefundableItems(manager, paymentId, dto.items);
 
-    const refund = await this.refundRepo.save(
-      this.refundRepo.create({
-        payment_id: payment.id,
-        order_id: payment.order_id,
-        amount,
-        reason: dto.reason,
-        status: RefundStatus.PENDING,
-        actorId: actorId ?? null,
-        items: itemsToCreate as RefundItem[],
-      }),
+        const refund = await manager.save(
+          Refund,
+          manager.create(Refund, {
+            payment_id: payment.id,
+            order_id: payment.order_id,
+            amount,
+            reason: dto.reason,
+            status: RefundStatus.PENDING,
+            actorId: actorId ?? null,
+            items: itemsToCreate as RefundItem[],
+          }),
+        );
+
+        return { refund, payment, amount };
+      },
     );
 
+    // Phase 2 — call the gateway outside any lock/transaction (network I/O).
     const provider = this.gatewayRegistry.resolve(payment.method);
-
+    let gatewayError: Error | undefined;
     try {
       if (provider?.refund) {
         const result = await provider.refund(payment, amount, dto.reason);
@@ -431,37 +614,65 @@ export class PaymentsService {
         refund.metadata = result.raw ?? null;
       }
       refund.status = RefundStatus.SUCCEEDED;
-      await this.refundRepo.save(refund);
     } catch (error) {
+      gatewayError = error instanceof Error ? error : new Error(String(error));
       refund.status = RefundStatus.FAILED;
-      refund.metadata = {
-        error: error instanceof Error ? error.message : String(error),
-      };
-      await this.refundRepo.save(refund);
-      throw error;
+      refund.metadata = { error: gatewayError.message };
     }
 
-    const totalRefunded = new Big(alreadyRefundedTotal)
-      .plus(amount)
-      .round(MONEY_DECIMAL_PLACES)
-      .toNumber();
-    payment.status =
-      totalRefunded >= Number(payment.amount)
-        ? PaymentStatus.REFUNDED
-        : PaymentStatus.PARTIALLY_REFUNDED;
-    await this.paymentRepo.save(payment);
+    // Phase 3 — settle. Re-locks the payment row so the refund status write,
+    // the payment status write, and the order status sync commit together
+    // and stay consistent with other concurrent settlements (webhook
+    // events, other refunds) on the same payment.
+    const orderNotify = await this.dataSource.transaction(async (manager) => {
+      await manager.save(Refund, refund);
 
-    await this.ordersService.applyStatusChange(
-      payment.order_id,
-      payment.status === PaymentStatus.REFUNDED
-        ? OrderStatus.REFUNDED
-        : OrderStatus.PARTIALLY_REFUNDED,
-      {
-        actorType: OrderStatusChangeActor.ADMIN,
-        actorId,
-        note: `Refund: ${dto.reason}`,
-      },
-    );
+      if (gatewayError) return null;
+
+      // Use the freshly locked row as the base for the mutation, not the
+      // `payment` object captured back in Phase 1 — that snapshot predates
+      // the (potentially slow) gateway call in Phase 2, so saving it back
+      // as-is would silently revert any field a concurrent settlement wrote
+      // to this payment in between.
+      const lockedPayment = await manager.findOne(Payment, {
+        where: { id: payment.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!lockedPayment) throw new NotFoundException('Payment not found');
+
+      const succeededTotal = await this.sumRefundAmount(manager, paymentId, [
+        RefundStatus.SUCCEEDED,
+      ]);
+      lockedPayment.status =
+        succeededTotal >= Number(lockedPayment.amount)
+          ? PaymentStatus.REFUNDED
+          : PaymentStatus.PARTIALLY_REFUNDED;
+      await manager.save(Payment, lockedPayment);
+
+      return this.ordersService.applyStatusChange(
+        lockedPayment.order_id,
+        lockedPayment.status === PaymentStatus.REFUNDED
+          ? OrderStatus.REFUNDED
+          : OrderStatus.PARTIALLY_REFUNDED,
+        {
+          actorType: OrderStatusChangeActor.ADMIN,
+          actorId,
+          note: `Refund: ${dto.reason}`,
+        },
+        manager,
+      );
+    });
+
+    // Only fires once the transaction above has actually committed — see
+    // applyStatusChange's doc comment for why this can't happen inline.
+    if (orderNotify) {
+      this.ordersService.notifyOrderStatusChanged(
+        orderNotify.order,
+        orderNotify.fromStatus,
+      );
+    }
+
+    if (gatewayError) throw gatewayError;
 
     const created = await this.refundRepo.findOne({
       where: { id: refund.id },
@@ -477,31 +688,37 @@ export class PaymentsService {
     });
   }
 
-  private async getRefundedQuantitiesByItem(
+  private async getRefundQuantitiesByItem(
+    manager: EntityManager,
     paymentId: string,
+    statuses: RefundStatus[],
   ): Promise<Map<string, number>> {
-    const refunds = await this.refundRepo.find({
-      where: { payment_id: paymentId, status: RefundStatus.SUCCEEDED },
+    const refunds = await manager.find(Refund, {
+      where: { payment_id: paymentId, status: In(statuses) },
     });
 
-    const refundedQtyByItem = new Map<string, number>();
+    const qtyByItem = new Map<string, number>();
     for (const refund of refunds) {
       for (const item of refund.items) {
-        refundedQtyByItem.set(
+        qtyByItem.set(
           item.order_item_id,
-          (refundedQtyByItem.get(item.order_item_id) ?? 0) + item.quantity,
+          (qtyByItem.get(item.order_item_id) ?? 0) + item.quantity,
         );
       }
     }
-    return refundedQtyByItem;
+    return qtyByItem;
   }
 
-  private async sumSucceededRefundAmount(paymentId: string): Promise<number> {
-    const result = await this.refundRepo
-      .createQueryBuilder('r')
+  private async sumRefundAmount(
+    manager: EntityManager,
+    paymentId: string,
+    statuses: RefundStatus[],
+  ): Promise<number> {
+    const result = await manager
+      .createQueryBuilder(Refund, 'r')
       .select('COALESCE(SUM(r.amount), 0)', 'total')
       .where('r.payment_id = :paymentId', { paymentId })
-      .andWhere('r.status = :status', { status: RefundStatus.SUCCEEDED })
+      .andWhere('r.status IN (:...statuses)', { statuses })
       .getRawOne<{ total: string }>();
     return Number(result?.total ?? 0);
   }

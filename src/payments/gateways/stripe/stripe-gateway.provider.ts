@@ -9,6 +9,7 @@ import {
   PaymentRefundResult,
 } from '../payment-gateway.interface';
 import { StripeClientProvider } from './stripe-client.provider';
+import { toStripeAmount } from './stripe-currency.util';
 
 @Injectable()
 export class StripeGatewayProvider implements PaymentGatewayProvider {
@@ -51,7 +52,10 @@ export class StripeGatewayProvider implements PaymentGatewayProvider {
           quantity: 1,
           price_data: {
             currency: stripeConfig.currency,
-            unit_amount: Math.round(Number(order.total)),
+            unit_amount: toStripeAmount(
+              Number(order.total),
+              stripeConfig.currency,
+            ),
             product_data: {
               name: `Order ${order.orderNumber}`,
             },
@@ -78,9 +82,19 @@ export class StripeGatewayProvider implements PaymentGatewayProvider {
       );
     }
 
+    // Use the PaymentIntent's actual currency, not the currently configured
+    // default — if STRIPE_CURRENCY is ever changed after this payment was
+    // originally charged, using the config value here would apply the wrong
+    // unit multiplier to `amount`, even though Stripe itself always refunds
+    // in the original charge's currency regardless of what we pass.
+    const paymentIntent =
+      await this.stripeClient.client.paymentIntents.retrieve(
+        payment.transactionId,
+      );
+
     const refund = await this.stripeClient.client.refunds.create({
       payment_intent: payment.transactionId,
-      amount: Math.round(amount),
+      amount: toStripeAmount(amount, paymentIntent.currency),
       metadata: {
         payment_id: payment.id,
         reason,
