@@ -570,6 +570,24 @@ export class OrdersService {
    * as a side effect of their own action, while still recording it in the
    * order's audit trail.
    */
+  // `manager` lets a caller that's already inside its own transaction (e.g.
+  // PaymentsService writing a payment row and the resulting order status
+  // together) fold this status change into that same transaction instead of
+  // opening a second independent one — otherwise the payment write could
+  // commit while this order write fails (or vice versa), leaving payment and
+  // order status inconsistent. When no manager is passed, a fresh
+  // transaction is opened as before.
+  //
+  // Notifying is the caller's responsibility when a manager is passed: this
+  // write is nested inside the caller's own transaction, which may still
+  // roll back (a later statement in that same transaction throwing, or the
+  // final COMMIT itself failing) after this method returns but before the
+  // caller's transaction promise resolves. Firing the status-change email
+  // from inside here would risk notifying about a change that never
+  // actually persisted. Instead, this returns `fromStatus` so the caller
+  // can pass it to `notifyOrderStatusChanged` once ITS OWN transaction has
+  // committed — the same after-commit-only pattern `cancel`/`updateStatus`
+  // already use for their own notifications.
   async applyStatusChange(
     orderId: string,
     toStatus: OrderStatus,
@@ -578,37 +596,55 @@ export class OrdersService {
       actorId?: string;
       note?: string;
     },
-  ): Promise<Order> {
-    const { order, fromStatus } = await this.dataSource.transaction(
-      async (manager) => {
-        const order = await manager.findOne(Order, {
-          where: { id: orderId },
-        });
-        if (!order) throw new NotFoundException('Order not found');
-        if (order.status === toStatus) return { order, fromStatus: null };
+    manager?: EntityManager,
+  ): Promise<{ order: Order; fromStatus: OrderStatus | null }> {
+    const run = async (manager: EntityManager) => {
+      const order = await manager.findOne(Order, {
+        where: { id: orderId },
+      });
+      if (!order) throw new NotFoundException('Order not found');
+      if (order.status === toStatus) return { order, fromStatus: null };
 
-        const fromStatus = order.status;
-        order.status = toStatus;
-        await manager.save(Order, order);
+      const fromStatus = order.status;
+      order.status = toStatus;
+      await manager.save(Order, order);
 
-        await this.recordStatusChange(manager, {
-          orderId,
-          fromStatus,
-          toStatus,
-          actorType: actor.actorType,
-          actorId: actor.actorId,
-          note: actor.note,
-        });
+      await this.recordStatusChange(manager, {
+        orderId,
+        fromStatus,
+        toStatus,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        note: actor.note,
+      });
 
-        return { order, fromStatus };
-      },
-    );
+      return { order, fromStatus };
+    };
 
+    const result = manager
+      ? await run(manager)
+      : await this.dataSource.transaction(run);
+
+    // Only self-notify when we own the transaction (no manager passed) —
+    // by the time we get here it has already committed. See the doc
+    // comment above for the manager-passed case.
+    if (!manager && result.fromStatus !== null) {
+      void this.notifyOrderStatusUpdate(result.order, result.fromStatus);
+    }
+
+    return result;
+  }
+
+  /**
+   * Companion to `applyStatusChange` for callers that pass their own
+   * `manager`: call this after your own transaction has committed, with the
+   * `order`/`fromStatus` that call returned, to send the status-change
+   * email only once the change is actually durable.
+   */
+  notifyOrderStatusChanged(order: Order, fromStatus: OrderStatus | null): void {
     if (fromStatus !== null) {
       void this.notifyOrderStatusUpdate(order, fromStatus);
     }
-
-    return order;
   }
 
   async getStatusHistory(

@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { UsersService } from '@/users/users.service';
 import { MailService } from '@/mail/mail.service';
@@ -16,6 +16,7 @@ import {
   RejectRefundRequestDto,
 } from './dto/review-refund-request.dto';
 import { RefundRequestQueryDto } from './dto/refund-request-query.dto';
+import { Payment } from './entities/payment.entity';
 import { RefundRequest } from './entities/refund-request.entity';
 import { RefundRequestStatus } from './enums/refund-request-status.enum';
 import { PaymentStatus } from './enums/payment-status.enum';
@@ -28,6 +29,7 @@ export class RefundRequestsService {
   constructor(
     @InjectRepository(RefundRequest)
     private readonly refundRequestRepo: Repository<RefundRequest>,
+    private readonly dataSource: DataSource,
     private readonly paymentsService: PaymentsService,
     private readonly usersService: UsersService,
     private readonly mailService: MailService,
@@ -49,28 +51,45 @@ export class RefundRequestsService {
       );
     }
 
-    const reservedQtyByItem = await this.getPendingQuantitiesByItem(
-      dto.payment_id,
-    );
+    // Locks the payment row so the "how much is already pending/refunded"
+    // check and the new RefundRequest insert are atomic against concurrent
+    // refund requests for the same payment/items — otherwise both could
+    // read the same reserved quantities before either inserts and together
+    // over-commit more than what's actually refundable. The same lock is
+    // taken by PaymentsService.createRefund/resolveRefundableItems, so this
+    // also serializes against an admin approving a request concurrently.
+    const refundRequest = await this.dataSource.transaction(async (manager) => {
+      await manager.findOne(Payment, {
+        where: { id: dto.payment_id },
+        lock: { mode: 'pessimistic_write' },
+      });
 
-    const { itemsToCreate, amount } =
-      await this.paymentsService.resolveRefundableItems(
+      const reservedQtyByItem = await this.getPendingQuantitiesByItem(
+        manager,
         dto.payment_id,
-        dto.items,
-        reservedQtyByItem,
       );
 
-    const refundRequest = await this.refundRequestRepo.save(
-      this.refundRequestRepo.create({
-        payment_id: payment.id,
-        order_id: payment.order_id,
-        requested_by: userId,
-        amount,
-        reason: dto.reason,
-        status: RefundRequestStatus.PENDING,
-        items: itemsToCreate,
-      }),
-    );
+      const { itemsToCreate, amount } =
+        await this.paymentsService.resolveRefundableItems(
+          manager,
+          dto.payment_id,
+          dto.items,
+          reservedQtyByItem,
+        );
+
+      return manager.save(
+        RefundRequest,
+        manager.create(RefundRequest, {
+          payment_id: payment.id,
+          order_id: payment.order_id,
+          requested_by: userId,
+          amount,
+          reason: dto.reason,
+          status: RefundRequestStatus.PENDING,
+          items: itemsToCreate,
+        }),
+      );
+    });
 
     void this.notifyRequested(refundRequest);
 
@@ -194,9 +213,10 @@ export class RefundRequestsService {
    * once pending requests are accounted for.
    */
   private async getPendingQuantitiesByItem(
+    manager: EntityManager,
     paymentId: string,
   ): Promise<Map<string, number>> {
-    const pending = await this.refundRequestRepo.find({
+    const pending = await manager.find(RefundRequest, {
       where: { payment_id: paymentId, status: RefundRequestStatus.PENDING },
     });
 
@@ -213,10 +233,10 @@ export class RefundRequestsService {
   }
 
   private async notifyRequested(refundRequest: RefundRequest): Promise<void> {
-    const user = await this.usersService.findById(refundRequest.requested_by);
-    if (!user) return;
-
     try {
+      const user = await this.usersService.findById(refundRequest.requested_by);
+      if (!user) return;
+
       await this.mailService.sendRefundRequestReceived(user.email, {
         reason: refundRequest.reason,
         amount: Number(refundRequest.amount),
@@ -230,10 +250,10 @@ export class RefundRequestsService {
   }
 
   private async notifyReviewed(refundRequest: RefundRequest): Promise<void> {
-    const user = await this.usersService.findById(refundRequest.requested_by);
-    if (!user) return;
-
     try {
+      const user = await this.usersService.findById(refundRequest.requested_by);
+      if (!user) return;
+
       if (refundRequest.status === RefundRequestStatus.APPROVED) {
         await this.mailService.sendRefundRequestApproved(user.email, {
           reason: refundRequest.reason,
