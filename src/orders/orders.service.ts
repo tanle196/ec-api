@@ -492,32 +492,50 @@ export class OrdersService {
   }
 
   async cancel(id: string, userId: string): Promise<Order> {
-    const order = await this.findOne(id, userId);
+    // The precondition check and the write both happen inside the
+    // transaction, against a row locked at the very start of it — not
+    // against a snapshot fetched before the transaction opened. Without the
+    // lock, this could race with a concurrent applyStatusChange (e.g. a
+    // Stripe webhook confirming payment) or another cancel/updateStatus
+    // call on the same order: both would validate against the same
+    // pre-change status, and whichever `manager.save` commits last would
+    // silently overwrite the other's status change — here that could mean
+    // reverting a just-confirmed order back to CANCELLED and incorrectly
+    // restoring stock for an order that was actually paid.
+    const { updated, fromStatus } = await this.dataSource.transaction(
+      async (manager) => {
+        const order = await manager.findOne(Order, {
+          where: { id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!order) throw new NotFoundException('Order not found');
+        if (order.user_id !== userId) throw new ForbiddenException();
 
-    if (!CANCELLABLE_STATUSES.includes(order.status)) {
-      throw new BadRequestException(
-        `Cannot cancel order with status "${order.status}"`,
-      );
-    }
+        if (!CANCELLABLE_STATUSES.includes(order.status)) {
+          throw new BadRequestException(
+            `Cannot cancel order with status "${order.status}"`,
+          );
+        }
 
-    const fromStatus = order.status;
+        const fromStatus = order.status;
 
-    const updated = await this.dataSource.transaction(async (manager) => {
-      await this.restoreStock(order, manager);
+        await this.restoreStock(order, manager);
 
-      order.status = OrderStatus.CANCELLED;
-      await manager.save(Order, order);
+        order.status = OrderStatus.CANCELLED;
+        await manager.save(Order, order);
 
-      await this.recordStatusChange(manager, {
-        orderId: order.id,
-        fromStatus,
-        toStatus: OrderStatus.CANCELLED,
-        actorType: OrderStatusChangeActor.CUSTOMER,
-        actorId: userId,
-      });
+        await this.recordStatusChange(manager, {
+          orderId: order.id,
+          fromStatus,
+          toStatus: OrderStatus.CANCELLED,
+          actorType: OrderStatusChangeActor.CUSTOMER,
+          actorId: userId,
+        });
 
-      return this.findOrderOrThrow(manager, order.id);
-    });
+        const updated = await this.findOrderOrThrow(manager, order.id);
+        return { updated, fromStatus };
+      },
+    );
 
     void this.notifyOrderStatusUpdate(updated, fromStatus);
 
@@ -529,36 +547,46 @@ export class OrdersService {
     dto: UpdateOrderStatusDto,
     actor: { actorType: OrderStatusChangeActor; actorId?: string },
   ): Promise<Order> {
-    const order = await this.findOne(id);
+    // See cancel() — same lock-then-validate-then-write pattern, against the
+    // same class of race with applyStatusChange/cancel/updateStatus calls
+    // landing concurrently on the same order.
+    const { updated, fromStatus } = await this.dataSource.transaction(
+      async (manager) => {
+        const order = await manager.findOne(Order, {
+          where: { id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!order) throw new NotFoundException('Order not found');
 
-    const allowedNext = ALLOWED_TRANSITIONS[order.status];
-    if (!allowedNext.includes(dto.status)) {
-      throw new BadRequestException(
-        `Cannot transition order from "${order.status}" to "${dto.status}"`,
-      );
-    }
+        const allowedNext = ALLOWED_TRANSITIONS[order.status];
+        if (!allowedNext.includes(dto.status)) {
+          throw new BadRequestException(
+            `Cannot transition order from "${order.status}" to "${dto.status}"`,
+          );
+        }
 
-    const fromStatus = order.status;
+        const fromStatus = order.status;
 
-    const updated = await this.dataSource.transaction(async (manager) => {
-      if (dto.status === OrderStatus.CANCELLED) {
-        await this.restoreStock(order, manager);
-      }
+        if (dto.status === OrderStatus.CANCELLED) {
+          await this.restoreStock(order, manager);
+        }
 
-      order.status = dto.status;
-      await manager.save(Order, order);
+        order.status = dto.status;
+        await manager.save(Order, order);
 
-      await this.recordStatusChange(manager, {
-        orderId: order.id,
-        fromStatus,
-        toStatus: dto.status,
-        actorType: actor.actorType,
-        actorId: actor.actorId,
-        note: dto.note,
-      });
+        await this.recordStatusChange(manager, {
+          orderId: order.id,
+          fromStatus,
+          toStatus: dto.status,
+          actorType: actor.actorType,
+          actorId: actor.actorId,
+          note: dto.note,
+        });
 
-      return this.findOrderOrThrow(manager, order.id);
-    });
+        const updated = await this.findOrderOrThrow(manager, order.id);
+        return { updated, fromStatus };
+      },
+    );
 
     void this.notifyOrderStatusUpdate(updated, fromStatus);
 
@@ -599,8 +627,14 @@ export class OrdersService {
     manager?: EntityManager,
   ): Promise<{ order: Order; fromStatus: OrderStatus | null }> {
     const run = async (manager: EntityManager) => {
+      // Locked for the same reason cancel()/updateStatus() lock the order
+      // row: this read-check-write must not race with either of those, or
+      // with another applyStatusChange call (e.g. two payment webhook
+      // events touching the same order), or a later write here could
+      // silently clobber a status change that landed in between.
       const order = await manager.findOne(Order, {
         where: { id: orderId },
+        lock: { mode: 'pessimistic_write' },
       });
       if (!order) throw new NotFoundException('Order not found');
       if (order.status === toStatus) return { order, fromStatus: null };

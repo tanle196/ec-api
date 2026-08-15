@@ -257,6 +257,21 @@ describe('PaymentsService', () => {
       );
     });
 
+    it('rejects setting status to refunded directly', async () => {
+      const { service, ordersService } = buildService();
+
+      await expect(
+        service.updateStatus('payment-1', {
+          status: PaymentStatus.REFUNDED,
+        }),
+      ).rejects.toThrow(
+        'Status "refunded" is set automatically by the refund flow and cannot be assigned directly',
+      );
+      // Must fail before ever touching the order — no Refund record and no
+      // gateway call happened, so the order must not be moved either.
+      expect(ordersService.applyStatusChange).not.toHaveBeenCalled();
+    });
+
     it('throws when the payment is already in a terminal status', async () => {
       const { service, manager } = buildService();
       manager.findOne.mockResolvedValueOnce({
