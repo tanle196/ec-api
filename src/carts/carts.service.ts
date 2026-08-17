@@ -4,7 +4,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { ProductVariant } from '@/products/entities/product-variant.entity';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { UpdateCartItemDto } from './dto/update-cart-item.dto';
@@ -20,6 +20,7 @@ export class CartsService {
     private readonly itemRepo: Repository<CartItem>,
     @InjectRepository(ProductVariant)
     private readonly variantRepo: Repository<ProductVariant>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async getCart(userId: string): Promise<Cart> {
@@ -56,27 +57,46 @@ export class CartsService {
 
     const cart = await this.getCart(userId);
 
-    const existing = await this.itemRepo.findOne({
-      where: { cart_id: cart.id, variant_id: dto.variant_id },
-    });
+    await this.dataSource.transaction(async (manager) => {
+      // Re-read the variant's stock inside the transaction under a shared
+      // lock, since the value fetched above can already be stale by the
+      // time we get here (e.g. an order decremented it in the meantime).
+      // The lock also blocks a concurrent stock decrement from committing
+      // until this check has run, so the two can't race.
+      const freshVariant = await manager.findOne(ProductVariant, {
+        where: { id: dto.variant_id },
+        lock: { mode: 'pessimistic_read' },
+      });
 
-    if (existing) {
-      const newQty = existing.quantity + quantity;
-      if (variant.stock < newQty) {
+      if (!freshVariant) throw new NotFoundException('Variant not found');
+
+      // Atomic upsert keyed on the (cart_id, variant_id) unique constraint:
+      // two concurrent addItem calls for the same variant now serialize on
+      // this row instead of both reading "no existing row" and each
+      // inserting their own, which used to leave two cart_item rows for one
+      // variant. DO UPDATE merges the quantity in the same statement that
+      // creates the row, so there's no separate read-then-write to race.
+      const [{ quantity: newQty }]: { quantity: number }[] =
+        await manager.query(
+          `INSERT INTO "cart_items" ("cart_id", "variant_id", "quantity")
+           VALUES ($1, $2, $3)
+           ON CONFLICT ("cart_id", "variant_id")
+           DO UPDATE SET
+             "quantity" = "cart_items"."quantity" + EXCLUDED."quantity",
+             "updatedAt" = now()
+           RETURNING "quantity"`,
+          [cart.id, dto.variant_id, quantity],
+        );
+
+      // Re-validate against the merged total inside the same transaction, so
+      // an insufficient-stock error rolls back the upsert above instead of
+      // leaving a partially-applied quantity change.
+      if (freshVariant.stock < newQty) {
         throw new UnprocessableEntityException(
-          `Insufficient stock: available ${variant.stock}, requested ${newQty}`,
+          `Insufficient stock: available ${freshVariant.stock}, requested ${newQty}`,
         );
       }
-      existing.quantity = newQty;
-      await this.itemRepo.save(existing);
-    } else {
-      const item = this.itemRepo.create({
-        cart_id: cart.id,
-        variant_id: dto.variant_id,
-        quantity,
-      });
-      await this.itemRepo.save(item);
-    }
+    });
 
     return this.getCart(userId);
   }
