@@ -136,6 +136,27 @@ describe('PaymentsService', () => {
       expect(manager.save).toHaveBeenCalledTimes(1);
       expect(paymentRepo.save).toHaveBeenCalledTimes(1);
     });
+
+    it('marks the payment FAILED and rethrows when provider.initiate() fails, so a retry is not blocked by a stuck PENDING payment', async () => {
+      const initiate = jest.fn().mockRejectedValue(new Error('stripe down'));
+      const { service, manager, paymentRepo } = buildService({
+        provider: { initiate },
+      });
+      manager.findOne
+        .mockResolvedValueOnce(order) // locked order lookup
+        .mockResolvedValueOnce(null); // existing-active-payment check
+
+      await expect(
+        service.create('user-1', {
+          order_id: 'order-1',
+          method: PaymentMethod.STRIPE,
+        }),
+      ).rejects.toThrow('stripe down');
+
+      expect(paymentRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: PaymentStatus.FAILED }),
+      );
+    });
   });
 
   describe('completeFromGatewayEvent', () => {

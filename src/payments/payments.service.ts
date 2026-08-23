@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -48,8 +49,20 @@ const COMMITTED_REFUND_STATUSES = [
   RefundStatus.SUCCEEDED,
 ];
 
+// A payment in any of these statuses has already been settled one way or
+// another (paid in full, or resolved via the refund flow) and must not be
+// mutated by updateStatus/completeFromGatewayEvent/failFromGatewayEvent —
+// kept as one shared list so the three call sites can't drift out of sync.
+const TERMINAL_PAYMENT_STATUSES = [
+  PaymentStatus.COMPLETED,
+  PaymentStatus.PARTIALLY_REFUNDED,
+  PaymentStatus.REFUNDED,
+];
+
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     @InjectRepository(Payment)
     private readonly paymentRepo: Repository<Payment>,
@@ -116,14 +129,33 @@ export class PaymentsService {
     const provider = this.gatewayRegistry.resolve(dto.method);
     if (!provider) return payment;
 
-    const result = await provider.initiate(payment, order);
-    payment.transactionId = result.providerRef;
-    payment.metadata = {
-      ...(payment.metadata ?? {}),
-      checkoutUrl: result.redirectUrl ?? null,
-    };
+    try {
+      const result = await provider.initiate(payment, order);
+      payment.transactionId = result.providerRef;
+      payment.metadata = {
+        ...(payment.metadata ?? {}),
+        checkoutUrl: result.redirectUrl ?? null,
+      };
 
-    return this.paymentRepo.save(payment);
+      return await this.paymentRepo.save(payment);
+    } catch (error) {
+      // The PENDING payment row was already committed above (phase 1), so
+      // leaving it PENDING here would permanently trip the "active payment
+      // already exists" check in phase 1 on retry, with no checkoutUrl for
+      // the customer to fall back on. Mark it FAILED so a retried create()
+      // for this order isn't blocked by a payment that never actually
+      // reached the gateway.
+      try {
+        payment.status = PaymentStatus.FAILED;
+        await this.paymentRepo.save(payment);
+      } catch (saveError) {
+        this.logger.error(
+          `Failed to mark payment ${payment.id} FAILED after initiate() error`,
+          saveError instanceof Error ? saveError.stack : saveError,
+        );
+      }
+      throw error;
+    }
   }
 
   async findAll(
@@ -204,11 +236,7 @@ export class PaymentsService {
       const payment = await this.lockPayment(manager, id);
       if (!payment) throw new NotFoundException('Payment not found');
 
-      if (
-        payment.status === PaymentStatus.COMPLETED ||
-        payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
-        payment.status === PaymentStatus.REFUNDED
-      ) {
+      if (TERMINAL_PAYMENT_STATUSES.includes(payment.status)) {
         throw new BadRequestException(
           `Cannot update a payment with status "${payment.status}"`,
         );
@@ -259,11 +287,7 @@ export class PaymentsService {
     return this.commitAndNotify<GatewayEventOutcome>(async (manager) => {
       const payment = await this.lockPayment(manager, paymentId);
       if (!payment) return { result: 'not_found', orderNotify: null };
-      if (
-        payment.status === PaymentStatus.COMPLETED ||
-        payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
-        payment.status === PaymentStatus.REFUNDED
-      ) {
+      if (TERMINAL_PAYMENT_STATUSES.includes(payment.status)) {
         return { result: 'already_terminal', orderNotify: null };
       }
 
@@ -295,11 +319,7 @@ export class PaymentsService {
     return this.dataSource.transaction(async (manager) => {
       const payment = await this.lockPayment(manager, paymentId);
       if (!payment) return 'not_found';
-      if (
-        payment.status === PaymentStatus.COMPLETED ||
-        payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
-        payment.status === PaymentStatus.REFUNDED
-      ) {
+      if (TERMINAL_PAYMENT_STATUSES.includes(payment.status)) {
         return 'already_terminal';
       }
 

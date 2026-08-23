@@ -4,6 +4,7 @@ import { ApiExcludeController } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { PaymentMethod } from './enums/payment-method.enum';
+import { WebhookProcessingStatus } from './enums/webhook-processing-status.enum';
 import { StripeWebhookVerifierService } from './gateways/stripe/stripe-webhook-verifier.service';
 import { PaymentWebhooksService } from './payment-webhooks.service';
 import { PaymentsService } from './payments.service';
@@ -34,7 +35,17 @@ export class PaymentWebhooksController {
       event.id,
       event as unknown as Record<string, unknown>,
     );
-    if (!isNew) return { received: true };
+    // A duplicate (isNew:false) row still sitting at RECEIVED means the
+    // previous delivery of this event was recorded but never finished
+    // processing (e.g. an unhandled exception below before markProcessed/
+    // markError ran) — fall through and reprocess it instead of treating it
+    // as done, or Stripe's retry would be silently swallowed forever and the
+    // event would never actually complete. Every handler below is already
+    // idempotent against re-running (terminal-status checks, transaction-id
+    // lookups), so replaying it here is safe.
+    if (!isNew && record.status !== WebhookProcessingStatus.RECEIVED) {
+      return { received: true };
+    }
 
     switch (event.type) {
       case 'checkout.session.completed': {

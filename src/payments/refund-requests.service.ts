@@ -124,31 +124,60 @@ export class RefundRequestsService {
     adminId: string,
     dto: ApproveRefundRequestDto,
   ): Promise<RefundRequest> {
-    const refundRequest = await this.findOrThrow(id);
-    if (refundRequest.status !== RefundRequestStatus.PENDING) {
-      throw new BadRequestException(
-        `Cannot approve a refund request with status "${refundRequest.status}"`,
+    // Phase 1 — lock the RefundRequest row and reserve it by flipping
+    // straight to APPROVED before calling out to the gateway. Without this,
+    // a concurrent approve()/approve() (double-click, retry) or
+    // approve()/reject() race could both read PENDING before either writes:
+    // two approvals would each issue a real Stripe refund for the same
+    // request, or an approval could land a real refund under a row whose
+    // final persisted status is REJECTED. The lock is released as soon as
+    // this transaction commits, before the (potentially slow) gateway call
+    // in createRefund below — see PaymentsService.createRefund for the same
+    // pattern.
+    const refundRequest = await this.dataSource.transaction(async (manager) => {
+      const rr = await this.lockRefundRequest(manager, id);
+      if (!rr) throw new NotFoundException('Refund request not found');
+      if (rr.status !== RefundRequestStatus.PENDING) {
+        throw new BadRequestException(
+          `Cannot approve a refund request with status "${rr.status}"`,
+        );
+      }
+
+      rr.status = RefundRequestStatus.APPROVED;
+      rr.reviewedBy = adminId;
+      rr.reviewedAt = new Date();
+      rr.adminNote = dto.note ?? null;
+      return manager.save(RefundRequest, rr);
+    });
+
+    // Phase 2 — call the gateway outside the lock/transaction (network I/O).
+    try {
+      const refund = await this.paymentsService.createRefund(
+        refundRequest.payment_id,
+        {
+          items: refundRequest.items.map((item) => ({
+            order_item_id: item.order_item_id,
+            quantity: item.quantity,
+          })),
+          reason: refundRequest.reason,
+        },
+        adminId,
       );
+      refundRequest.refund_id = refund.id;
+      await this.refundRequestRepo.save(refundRequest);
+    } catch (error) {
+      // createRefund failed (validation or gateway error) after this
+      // request was already reserved as APPROVED above — revert back to
+      // PENDING so it isn't left stuck "approved" with no refund_id, and so
+      // an admin can correct/retry it instead of hitting the terminal-status
+      // check on every future approve()/reject() call.
+      refundRequest.status = RefundRequestStatus.PENDING;
+      refundRequest.reviewedBy = null;
+      refundRequest.reviewedAt = null;
+      refundRequest.adminNote = null;
+      await this.refundRequestRepo.save(refundRequest);
+      throw error;
     }
-
-    const refund = await this.paymentsService.createRefund(
-      refundRequest.payment_id,
-      {
-        items: refundRequest.items.map((item) => ({
-          order_item_id: item.order_item_id,
-          quantity: item.quantity,
-        })),
-        reason: refundRequest.reason,
-      },
-      adminId,
-    );
-
-    refundRequest.status = RefundRequestStatus.APPROVED;
-    refundRequest.refund_id = refund.id;
-    refundRequest.reviewedBy = adminId;
-    refundRequest.reviewedAt = new Date();
-    refundRequest.adminNote = dto.note ?? null;
-    await this.refundRequestRepo.save(refundRequest);
 
     void this.notifyReviewed(refundRequest);
 
@@ -160,18 +189,23 @@ export class RefundRequestsService {
     adminId: string,
     dto: RejectRefundRequestDto,
   ): Promise<RefundRequest> {
-    const refundRequest = await this.findOrThrow(id);
-    if (refundRequest.status !== RefundRequestStatus.PENDING) {
-      throw new BadRequestException(
-        `Cannot reject a refund request with status "${refundRequest.status}"`,
-      );
-    }
+    // Same locked read-check-write as approve() — closes the identical race
+    // against a concurrent approve()/reject() on the same request.
+    const refundRequest = await this.dataSource.transaction(async (manager) => {
+      const rr = await this.lockRefundRequest(manager, id);
+      if (!rr) throw new NotFoundException('Refund request not found');
+      if (rr.status !== RefundRequestStatus.PENDING) {
+        throw new BadRequestException(
+          `Cannot reject a refund request with status "${rr.status}"`,
+        );
+      }
 
-    refundRequest.status = RefundRequestStatus.REJECTED;
-    refundRequest.reviewedBy = adminId;
-    refundRequest.reviewedAt = new Date();
-    refundRequest.adminNote = dto.note;
-    await this.refundRequestRepo.save(refundRequest);
+      rr.status = RefundRequestStatus.REJECTED;
+      rr.reviewedBy = adminId;
+      rr.reviewedAt = new Date();
+      rr.adminNote = dto.note;
+      return manager.save(RefundRequest, rr);
+    });
 
     void this.notifyReviewed(refundRequest);
 
@@ -205,6 +239,27 @@ export class RefundRequestsService {
     });
     if (!refundRequest) throw new NotFoundException('Refund request not found');
     return refundRequest;
+  }
+
+  // Shared pessimistic-lock read used by approve()/reject() so the lock
+  // acquisition can't drift out of sync between the two call sites — see
+  // PaymentsService.lockPayment for the same pattern. Locks only the
+  // refund_requests row via a raw FOR UPDATE rather than manager.findOne:
+  // RefundRequest.items is an eager OneToMany, which findOne pulls in via a
+  // LEFT JOIN, and Postgres rejects FOR UPDATE against the nullable side of
+  // an outer join. The raw row lock still fully serializes concurrent
+  // approve()/reject() calls; the follow-up findOne (unlocked, within the
+  // same transaction) is guaranteed to see consistent data once we hold it.
+  private async lockRefundRequest(
+    manager: EntityManager,
+    id: string,
+  ): Promise<RefundRequest | null> {
+    const locked = await manager.query<{ id: string }[]>(
+      'SELECT id FROM refund_requests WHERE id = $1 FOR UPDATE',
+      [id],
+    );
+    if (!locked.length) return null;
+    return manager.findOne(RefundRequest, { where: { id } });
   }
 
   /**
