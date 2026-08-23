@@ -92,17 +92,26 @@ export class PaymentsService {
 
         if (
           order.status === OrderStatus.CANCELLED ||
-          order.status === OrderStatus.REFUNDED
+          order.status === OrderStatus.REFUNDED ||
+          order.status === OrderStatus.PARTIALLY_REFUNDED
         ) {
           throw new BadRequestException(
             `Cannot pay for an order with status "${order.status}"`,
           );
         }
 
+        // PARTIALLY_REFUNDED is included alongside PENDING/COMPLETED: it's
+        // still the order's "active" payment (money was collected, only
+        // part of it was returned) and must not be superseded by a brand
+        // new full-amount Payment for the same order.
         const existingActive = await manager.findOne(Payment, {
           where: [
             { order_id: dto.order_id, status: PaymentStatus.PENDING },
             { order_id: dto.order_id, status: PaymentStatus.COMPLETED },
+            {
+              order_id: dto.order_id,
+              status: PaymentStatus.PARTIALLY_REFUNDED,
+            },
           ],
         });
 
@@ -350,7 +359,19 @@ export class PaymentsService {
       if (!payment) {
         return { result: 'not_found', orderNotify: null };
       }
-      if (payment.status === PaymentStatus.REFUNDED) {
+      // Unlike the sibling gateway-event handlers, this one deliberately
+      // doesn't block on the full TERMINAL_PAYMENT_STATUSES set — COMPLETED
+      // and PARTIALLY_REFUNDED are exactly the states a further dashboard
+      // refund is expected to move on from. But it must still reject a
+      // payment that was never actually marked paid (PENDING/FAILED): an
+      // out-of-order or lost checkout.session.completed event could
+      // otherwise let this handler mark a never-paid payment REFUNDED
+      // directly, with paidAt never set and no completed charge behind it.
+      if (
+        payment.status === PaymentStatus.REFUNDED ||
+        (payment.status !== PaymentStatus.COMPLETED &&
+          payment.status !== PaymentStatus.PARTIALLY_REFUNDED)
+      ) {
         return { result: 'already_terminal', orderNotify: null };
       }
 
@@ -483,6 +504,25 @@ export class PaymentsService {
       COMMITTED_REFUND_STATUSES,
     );
 
+    // Item unit prices are the raw pre-discount/shipping sticker prices, but
+    // what the customer actually paid (payment.amount = order.subtotal +
+    // shippingFee - discount) folds in the flat shipping fee and any
+    // discount too. Refunding pure unitPrice*quantity per item would only
+    // ever add up to payment.amount by coincidence (shippingFee ==
+    // discount) — otherwise refunding every item either overshoots what was
+    // actually charged (discount > shippingFee) or can never reach the full
+    // payment.amount balance (shippingFee > discount), leaving the payment
+    // stuck PARTIALLY_REFUNDED forever. Prorating every item by this ratio
+    // distributes the shipping/discount adjustment proportionally across
+    // refunded items, so refunding 100% of the order's items always
+    // reconciles to exactly payment.amount (mod rounding), and a partial
+    // refund returns a fair share of that same adjustment.
+    const orderSubtotal = Number(payment.order.subtotal);
+    const proration =
+      orderSubtotal > 0
+        ? new Big(Number(payment.amount)).div(orderSubtotal)
+        : new Big(1);
+
     let amount = new Big(0);
     const itemsToCreate: Partial<RefundItem>[] = [];
 
@@ -505,6 +545,7 @@ export class PaymentsService {
 
       const itemAmount = new Big(Number(orderItem.unitPrice))
         .times(reqItem.quantity)
+        .times(proration)
         .round(MONEY_DECIMAL_PLACES);
       amount = amount.plus(itemAmount);
 
@@ -569,7 +610,15 @@ export class PaymentsService {
     let gatewayError: Error | undefined;
     try {
       if (provider?.refund) {
-        const result = await provider.refund(payment, amount, dto.reason);
+        // refund.id is stable for the lifetime of this Refund row (created
+        // just above, before the gateway call) — see the interface's doc
+        // comment for why this protects against a double real refund.
+        const result = await provider.refund(
+          payment,
+          amount,
+          dto.reason,
+          refund.id,
+        );
         refund.transactionId = result.providerRef;
         refund.metadata = result.raw ?? null;
       }

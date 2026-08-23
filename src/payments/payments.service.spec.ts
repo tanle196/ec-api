@@ -462,6 +462,7 @@ describe('PaymentsService', () => {
       amount: 100,
       method: PaymentMethod.STRIPE,
       order: {
+        subtotal: 100,
         items: [
           {
             id: 'item-1',
@@ -527,7 +528,12 @@ describe('PaymentsService', () => {
         status: RefundStatus.SUCCEEDED,
         amount: 50,
       });
-      expect(refundFn).toHaveBeenCalledWith(paymentWithOrder, 50, 'oops');
+      expect(refundFn).toHaveBeenCalledWith(
+        paymentWithOrder,
+        50,
+        'oops',
+        undefined,
+      );
       // Settled as PARTIALLY_REFUNDED: 50 succeeded out of 100.
       expect(manager.save).toHaveBeenCalledWith(
         expect.anything(),

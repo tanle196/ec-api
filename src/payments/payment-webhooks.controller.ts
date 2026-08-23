@@ -59,11 +59,44 @@ export class PaymentWebhooksController {
           break;
         }
 
-        const outcome = await this.paymentsService.completeFromGatewayEvent(
-          paymentId,
+        // Delayed-notification payment methods (if ever enabled on the
+        // Stripe account) fire checkout.session.completed with
+        // payment_status "unpaid" before funds actually settle — there's no
+        // async_payment_succeeded handler wired up here to complete it
+        // later, so don't mark the payment/order confirmed for money that
+        // hasn't arrived yet. Leaving it as an error (rather than silently
+        // ignoring) keeps it visible instead of vanishing.
+        if (
+          session.payment_status !== 'paid' &&
+          session.payment_status !== 'no_payment_required'
+        ) {
+          await this.paymentWebhooksService.markError(
+            record,
+            `checkout completed with payment_status "${session.payment_status}" for payment ${paymentId} — not confirming`,
+          );
+          break;
+        }
+
+        // Only a real PaymentIntent id can ever be refunded later
+        // (StripeGatewayProvider.refund calls paymentIntents.retrieve on
+        // whatever is stored here) — falling back to the Checkout Session id
+        // would silently persist an id that looks valid but permanently
+        // breaks refunds for this payment the first time anyone tries.
+        const paymentIntentId =
           typeof session.payment_intent === 'string'
             ? session.payment_intent
-            : (session.payment_intent?.id ?? session.id),
+            : session.payment_intent?.id;
+        if (!paymentIntentId) {
+          await this.paymentWebhooksService.markError(
+            record,
+            `checkout completed with no payment_intent id for payment ${paymentId}`,
+          );
+          break;
+        }
+
+        const outcome = await this.paymentsService.completeFromGatewayEvent(
+          paymentId,
+          paymentIntentId,
           session as unknown as Record<string, unknown>,
           `Stripe webhook ${event.id}: checkout completed`,
         );

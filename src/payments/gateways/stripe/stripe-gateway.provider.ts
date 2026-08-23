@@ -75,6 +75,7 @@ export class StripeGatewayProvider implements PaymentGatewayProvider {
     payment: Payment,
     amount: number,
     reason: string,
+    idempotencyKey: string,
   ): Promise<PaymentRefundResult> {
     if (!payment.transactionId) {
       throw new BadRequestException(
@@ -92,14 +93,22 @@ export class StripeGatewayProvider implements PaymentGatewayProvider {
         payment.transactionId,
       );
 
-    const refund = await this.stripeClient.client.refunds.create({
-      payment_intent: payment.transactionId,
-      amount: toStripeAmount(amount, paymentIntent.currency),
-      metadata: {
-        payment_id: payment.id,
-        reason,
+    const refund = await this.stripeClient.client.refunds.create(
+      {
+        payment_intent: payment.transactionId,
+        amount: toStripeAmount(amount, paymentIntent.currency),
+        metadata: {
+          payment_id: payment.id,
+          reason,
+        },
       },
-    });
+      // Without this, the Stripe SDK's own automatic network-error retry
+      // (or an application-level retry after an ambiguous timeout) can
+      // create a second real refund at Stripe even though the first
+      // request actually succeeded server-side — Stripe dedupes any
+      // request replayed with the same key instead of double-refunding.
+      { idempotencyKey },
+    );
 
     return {
       providerRef: refund.id,

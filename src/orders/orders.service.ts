@@ -10,6 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import {
   DataSource,
   EntityManager,
+  In,
   QueryFailedError,
   Repository,
 } from 'typeorm';
@@ -24,6 +25,8 @@ import { MONEY_DECIMAL_PLACES, toMoney } from '@/common/utils/money.util';
 import { TypedConfigService } from '@/config/TypedConfigService';
 import { MailService } from '@/mail/mail.service';
 import { UsersService } from '@/users/users.service';
+import { Payment } from '@/payments/entities/payment.entity';
+import { PaymentStatus } from '@/payments/enums/payment-status.enum';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import {
@@ -79,6 +82,8 @@ export class OrdersService {
     private readonly variantRepo: Repository<ProductVariant>,
     @InjectRepository(OrderStatusHistory)
     private readonly statusHistoryRepo: Repository<OrderStatusHistory>,
+    @InjectRepository(Payment)
+    private readonly paymentRepo: Repository<Payment>,
     private readonly dataSource: DataSource,
     private readonly discountsService: DiscountsService,
     private readonly configService: TypedConfigService,
@@ -517,6 +522,28 @@ export class OrdersService {
           );
         }
 
+        // CANCELLABLE_STATUSES includes CONFIRMED, which is also the status
+        // a completed payment puts the order in — without this check, a
+        // customer could self-cancel (and get stock silently restored for)
+        // an order that was already actually paid, with no refund ever
+        // triggered. The Order row lock taken above already serializes this
+        // against a concurrent webhook still confirming payment — see the
+        // comment at the top of this method.
+        const paidPayment = await manager.findOne(Payment, {
+          where: {
+            order_id: id,
+            status: In([
+              PaymentStatus.COMPLETED,
+              PaymentStatus.PARTIALLY_REFUNDED,
+            ]),
+          },
+        });
+        if (paidPayment) {
+          throw new BadRequestException(
+            'Cannot cancel an order that has already been paid — request a refund instead',
+          );
+        }
+
         const fromStatus = order.status;
 
         await this.restoreStock(order, manager);
@@ -638,6 +665,24 @@ export class OrdersService {
       });
       if (!order) throw new NotFoundException('Order not found');
       if (order.status === toStatus) return { order, fromStatus: null };
+
+      // A payment-confirmation event (the only caller that ever targets
+      // CONFIRMED here) only makes sense while the order is still PENDING.
+      // Unlike updateStatus(), this method enforces no transition table at
+      // all — without this guard, a redelivered/reprocessed webhook event
+      // (see the webhook controller's RECEIVED-reprocessing) arriving after
+      // the order already legitimately moved on to PROCESSING/SHIPPED/... —
+      // or was CANCELLED — would silently force it backward, corrupting
+      // fulfillment state. Treated as a no-op rather than an error so the
+      // caller (e.g. PaymentsService.completeFromGatewayEvent) still
+      // persists the payment itself as COMPLETED; only this redundant
+      // order-status bump is skipped.
+      if (
+        toStatus === OrderStatus.CONFIRMED &&
+        order.status !== OrderStatus.PENDING
+      ) {
+        return { order, fromStatus: null };
+      }
 
       const fromStatus = order.status;
       order.status = toStatus;

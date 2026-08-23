@@ -70,7 +70,14 @@ describe('PaymentWebhooksController', () => {
     stripeWebhookVerifier.verify.mockReturnValue({
       id: 'evt_1',
       type: 'checkout.session.completed',
-      data: { object: { metadata: { payment_id: 'payment-1' }, id: 'cs_1' } },
+      data: {
+        object: {
+          metadata: { payment_id: 'payment-1' },
+          id: 'cs_1',
+          payment_status: 'paid',
+          payment_intent: 'pi_1',
+        },
+      },
     });
     paymentWebhooksService.recordEvent.mockResolvedValue({
       isNew: false,
@@ -83,13 +90,83 @@ describe('PaymentWebhooksController', () => {
     expect(result).toEqual({ received: true });
     expect(paymentsService.completeFromGatewayEvent).toHaveBeenCalledWith(
       'payment-1',
-      'cs_1',
+      'pi_1',
       expect.anything(),
       expect.stringContaining('evt_1'),
     );
     expect(paymentWebhooksService.markProcessed).toHaveBeenCalledWith(
       record,
       'payment-1',
+    );
+  });
+
+  it('does not confirm a checkout session whose payment_status is not paid yet', async () => {
+    const {
+      controller,
+      stripeWebhookVerifier,
+      paymentWebhooksService,
+      paymentsService,
+    } = buildController();
+    const record = { status: WebhookProcessingStatus.RECEIVED };
+    stripeWebhookVerifier.verify.mockReturnValue({
+      id: 'evt_3',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          metadata: { payment_id: 'payment-1' },
+          id: 'cs_1',
+          payment_status: 'unpaid',
+          payment_intent: 'pi_1',
+        },
+      },
+    });
+    paymentWebhooksService.recordEvent.mockResolvedValue({
+      isNew: true,
+      record,
+    });
+
+    const result = await controller.handleStripe(fakeRequest() as never);
+
+    expect(result).toEqual({ received: true });
+    expect(paymentsService.completeFromGatewayEvent).not.toHaveBeenCalled();
+    expect(paymentWebhooksService.markError).toHaveBeenCalledWith(
+      record,
+      expect.stringContaining('unpaid'),
+    );
+  });
+
+  it('errors instead of falling back to the Checkout Session id when payment_intent is missing', async () => {
+    const {
+      controller,
+      stripeWebhookVerifier,
+      paymentWebhooksService,
+      paymentsService,
+    } = buildController();
+    const record = { status: WebhookProcessingStatus.RECEIVED };
+    stripeWebhookVerifier.verify.mockReturnValue({
+      id: 'evt_4',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          metadata: { payment_id: 'payment-1' },
+          id: 'cs_1',
+          payment_status: 'paid',
+          payment_intent: null,
+        },
+      },
+    });
+    paymentWebhooksService.recordEvent.mockResolvedValue({
+      isNew: true,
+      record,
+    });
+
+    const result = await controller.handleStripe(fakeRequest() as never);
+
+    expect(result).toEqual({ received: true });
+    expect(paymentsService.completeFromGatewayEvent).not.toHaveBeenCalled();
+    expect(paymentWebhooksService.markError).toHaveBeenCalledWith(
+      record,
+      expect.stringContaining('no payment_intent id'),
     );
   });
 

@@ -19,10 +19,17 @@ export interface PaymentGatewayProvider {
   /**
    * Not all methods support refunding through the gateway (e.g. COD, bank
    * transfer are reconciled manually); implement only where applicable.
+   *
+   * `idempotencyKey` should be forwarded to the underlying gateway call
+   * whenever it supports one (e.g. Stripe) — it's derived from the Refund
+   * row's own id, stable for the lifetime of that row, so an
+   * automatic/network-level retry of this exact call can never create a
+   * second real refund at the gateway even if our own response was lost.
    */
   refund?(
     payment: Payment,
     amount: number,
     reason: string,
+    idempotencyKey: string,
   ): Promise<PaymentRefundResult>;
 }

@@ -145,6 +145,31 @@ describe('RefundRequestsService', () => {
         'Refund request not found',
       );
     });
+
+    it('does NOT revert to PENDING when createRefund succeeds but persisting the refund_id link fails', async () => {
+      // Regression test: the refund itself already succeeded (real money
+      // moved) by the time this save fails — reverting the request back to
+      // PENDING here would misrepresent that and invite a double-refund via
+      // re-approval.
+      const { service, manager, paymentsService, refundRequestRepo } =
+        buildService();
+      manager.query.mockResolvedValueOnce([{ id: 'rr-1' }]);
+      manager.findOne.mockResolvedValueOnce(pendingRequest());
+      paymentsService.createRefund.mockResolvedValueOnce({ id: 'refund-1' });
+      refundRequestRepo.save.mockRejectedValueOnce(new Error('db blip'));
+
+      await expect(service.approve('rr-1', 'admin-1', {})).rejects.toThrow(
+        'db blip',
+      );
+
+      expect(refundRequestRepo.save).toHaveBeenCalledTimes(1);
+      expect(refundRequestRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: RefundRequestStatus.APPROVED,
+          refund_id: 'refund-1',
+        }),
+      );
+    });
   });
 
   describe('reject', () => {

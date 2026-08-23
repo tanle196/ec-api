@@ -17,6 +17,7 @@ import {
 } from './dto/review-refund-request.dto';
 import { RefundRequestQueryDto } from './dto/refund-request-query.dto';
 import { Payment } from './entities/payment.entity';
+import { Refund } from './entities/refund.entity';
 import { RefundRequest } from './entities/refund-request.entity';
 import { RefundRequestStatus } from './enums/refund-request-status.enum';
 import { PaymentStatus } from './enums/payment-status.enum';
@@ -151,8 +152,12 @@ export class RefundRequestsService {
     });
 
     // Phase 2 — call the gateway outside the lock/transaction (network I/O).
+    // Only createRefund itself reverts the reservation on failure — once it
+    // has returned successfully, real money has already moved, and nothing
+    // after this point may revert `status` back to PENDING again.
+    let refund: Refund;
     try {
-      const refund = await this.paymentsService.createRefund(
+      refund = await this.paymentsService.createRefund(
         refundRequest.payment_id,
         {
           items: refundRequest.items.map((item) => ({
@@ -163,20 +168,35 @@ export class RefundRequestsService {
         },
         adminId,
       );
-      refundRequest.refund_id = refund.id;
-      await this.refundRequestRepo.save(refundRequest);
     } catch (error) {
-      // createRefund failed (validation or gateway error) after this
-      // request was already reserved as APPROVED above — revert back to
-      // PENDING so it isn't left stuck "approved" with no refund_id, and so
-      // an admin can correct/retry it instead of hitting the terminal-status
-      // check on every future approve()/reject() call.
+      // createRefund failed (validation or gateway error) before any refund
+      // was created — revert back to PENDING so it isn't left stuck
+      // "approved" with no refund_id, and so an admin can correct/retry it
+      // instead of hitting the terminal-status check on every future
+      // approve()/reject() call.
       refundRequest.status = RefundRequestStatus.PENDING;
       refundRequest.reviewedBy = null;
       refundRequest.reviewedAt = null;
       refundRequest.adminNote = null;
       await this.refundRequestRepo.save(refundRequest);
       throw error;
+    }
+
+    // The refund itself already succeeded — this request stays APPROVED no
+    // matter what happens below. If persisting the refund_id link fails
+    // (DB blip), surface the error so it's visible for follow-up, but do
+    // NOT revert the approval: reverting here would contradict money that
+    // has already moved, and would wrongly invite a re-approval attempt
+    // against a payment whose balance was already reduced.
+    refundRequest.refund_id = refund.id;
+    try {
+      await this.refundRequestRepo.save(refundRequest);
+    } catch (saveError) {
+      this.logger.error(
+        `Refund ${refund.id} succeeded for request ${id} but failed to persist the refund_id link`,
+        saveError instanceof Error ? saveError.stack : saveError,
+      );
+      throw saveError;
     }
 
     void this.notifyReviewed(refundRequest);
