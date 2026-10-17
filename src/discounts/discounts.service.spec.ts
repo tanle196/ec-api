@@ -47,6 +47,31 @@ describe('DiscountsService', () => {
       );
     });
 
+    it('rejects a percent value above 100', async () => {
+      const { service, repo } = buildService();
+
+      await expect(
+        service.create({
+          code: 'huge',
+          type: DiscountType.PERCENT,
+          value: 150,
+        }),
+      ).rejects.toThrow('Percent discount value must be between 0 and 100');
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('allows a fixed value above 100', async () => {
+      const { service } = buildService();
+
+      await expect(
+        service.create({
+          code: 'fixed',
+          type: DiscountType.FIXED,
+          value: 50000,
+        }),
+      ).resolves.toEqual(expect.objectContaining({ value: 50000 }));
+    });
+
     it('rejects a duplicate code regardless of case', async () => {
       const { service, repo } = buildService();
       repo.findOne.mockResolvedValue(discount);
@@ -124,6 +149,23 @@ describe('DiscountsService', () => {
 
       await expect(service.update('d-1', { code: 'other' })).rejects.toThrow(
         ConflictException,
+      );
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['raising a percent value above 100', { value: 101 }, discount],
+      [
+        'switching a large fixed value to percent',
+        { type: DiscountType.PERCENT },
+        { ...discount, type: DiscountType.FIXED, value: '50000.00' },
+      ],
+    ])('rejects %s', async (_label, dto, existing) => {
+      const { service, repo } = buildService();
+      repo.findOne.mockResolvedValueOnce({ ...existing });
+
+      await expect(service.update('d-1', dto)).rejects.toThrow(
+        BadRequestException,
       );
       expect(repo.save).not.toHaveBeenCalled();
     });
@@ -234,6 +276,12 @@ describe('DiscountsService', () => {
           100,
         ),
       ).toBe(30);
+    });
+
+    it('caps a percent discount at the subtotal', () => {
+      expect(
+        service.computeAmount({ ...discount, value: '150' } as never, 200),
+      ).toBe(200);
     });
 
     it('caps a fixed discount at the subtotal', () => {

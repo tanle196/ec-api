@@ -28,13 +28,12 @@ describe('MailService', () => {
 
     await service.sendForgotPassword('a@example.com', 'https://reset');
 
-    expect(sendMail).toHaveBeenCalledWith(
-      expect.objectContaining({
-        to: 'a@example.com',
-        template: './forgot-password',
-        context: { email: 'a@example.com', url: 'https://reset', year },
-      }),
-    );
+    expect(sendMail).toHaveBeenCalledWith({
+      to: 'a@example.com',
+      subject: 'Reset your password',
+      template: './forgot-password',
+      context: { email: 'a@example.com', url: 'https://reset', year },
+    });
   });
 
   it('formats money with 2 decimals in the order confirmation', async () => {

@@ -58,14 +58,18 @@ const CANCELLABLE_STATUSES: OrderStatus[] = [
 
 // Valid forward-moving transitions for admin status updates; anything not
 // listed here (e.g. moving backwards, or out of a terminal status) is rejected.
+// REFUNDED / PARTIALLY_REFUNDED are deliberately absent: they're derived
+// from real Refund records and only set by the payment refund flow (via
+// applyStatusChange). Letting an admin set them here would mark an order
+// refunded without any money actually being returned.
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
   [OrderStatus.CONFIRMED]: [OrderStatus.PROCESSING, OrderStatus.CANCELLED],
   [OrderStatus.PROCESSING]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
   [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED],
-  [OrderStatus.DELIVERED]: [OrderStatus.REFUNDED],
+  [OrderStatus.DELIVERED]: [],
   [OrderStatus.CANCELLED]: [],
-  [OrderStatus.PARTIALLY_REFUNDED]: [OrderStatus.REFUNDED],
+  [OrderStatus.PARTIALLY_REFUNDED]: [],
   [OrderStatus.REFUNDED]: [],
 };
 
@@ -529,20 +533,7 @@ export class OrdersService {
         // triggered. The Order row lock taken above already serializes this
         // against a concurrent webhook still confirming payment — see the
         // comment at the top of this method.
-        const paidPayment = await manager.findOne(Payment, {
-          where: {
-            order_id: id,
-            status: In([
-              PaymentStatus.COMPLETED,
-              PaymentStatus.PARTIALLY_REFUNDED,
-            ]),
-          },
-        });
-        if (paidPayment) {
-          throw new BadRequestException(
-            'Cannot cancel an order that has already been paid — request a refund instead',
-          );
-        }
+        await this.assertNotPaid(manager, id);
 
         const fromStatus = order.status;
 
@@ -595,6 +586,10 @@ export class OrdersService {
         const fromStatus = order.status;
 
         if (dto.status === OrderStatus.CANCELLED) {
+          // Same guard as the customer cancel(): cancelling a paid order
+          // would restore stock while the customer's money is never
+          // returned. Paid orders must go through the refund flow instead.
+          await this.assertNotPaid(manager, order.id);
           await this.restoreStock(order, manager);
         }
 
@@ -794,6 +789,23 @@ export class OrdersService {
       }
       throw new UnprocessableEntityException(
         `Insufficient stock for variant ${sku}`,
+      );
+    }
+  }
+
+  private async assertNotPaid(
+    manager: EntityManager,
+    orderId: string,
+  ): Promise<void> {
+    const paidPayment = await manager.findOne(Payment, {
+      where: {
+        order_id: orderId,
+        status: In([PaymentStatus.COMPLETED, PaymentStatus.PARTIALLY_REFUNDED]),
+      },
+    });
+    if (paidPayment) {
+      throw new BadRequestException(
+        'Cannot cancel an order that has already been paid — request a refund instead',
       );
     }
   }

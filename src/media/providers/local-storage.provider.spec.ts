@@ -1,4 +1,7 @@
-import { InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -73,6 +76,37 @@ describe('LocalStorageProvider', () => {
     await provider.delete(publicId);
 
     expect(fs.readdirSync(path.join(uploadPath, 'banners'))).toEqual([]);
+  });
+
+  it('only deletes the exact file, not others sharing the prefix', async () => {
+    const { publicId } = await provider.upload(file, 'banners');
+    const dir = path.join(uploadPath, 'banners');
+    const id = path.basename(publicId);
+    fs.writeFileSync(path.join(dir, `${id}-keep.png`), 'x');
+
+    await provider.delete(publicId);
+
+    expect(fs.readdirSync(dir)).toEqual([`${id}-keep.png`]);
+  });
+
+  it.each([
+    ['../outside', 'a sibling of the upload dir'],
+    ['../../etc/passwd', 'a system path'],
+    ['banners/../../outside', 'a traversal hidden in a folder'],
+    ['', 'an empty id'],
+    ['banners/..', 'a ".." basename'],
+  ])('rejects publicId %p (%s)', async (publicId) => {
+    const outside = path.join(path.dirname(uploadPath), 'outside');
+    fs.writeFileSync(outside, 'secret');
+
+    try {
+      await expect(provider.delete(publicId)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(fs.existsSync(outside)).toBe(true);
+    } finally {
+      fs.rmSync(outside, { force: true });
+    }
   });
 
   it('skips deletion when the folder does not exist', async () => {

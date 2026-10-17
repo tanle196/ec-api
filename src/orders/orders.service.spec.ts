@@ -824,6 +824,10 @@ describe('OrdersService', () => {
       [OrderStatus.CANCELLED, OrderStatus.CONFIRMED],
       [OrderStatus.REFUNDED, OrderStatus.DELIVERED],
       [OrderStatus.PENDING, OrderStatus.SHIPPED],
+      // Refund statuses are only set by the payment refund flow.
+      [OrderStatus.DELIVERED, OrderStatus.REFUNDED],
+      [OrderStatus.DELIVERED, OrderStatus.PARTIALLY_REFUNDED],
+      [OrderStatus.PARTIALLY_REFUNDED, OrderStatus.REFUNDED],
     ])('rejects %s -> %s', async (from, to) => {
       const ctx = buildService();
       ctx.state.order = { id: 'order-1', status: from };
@@ -852,6 +856,44 @@ describe('OrdersService', () => {
         { id: 'variant-a' },
         'stock',
         3,
+      );
+    });
+
+    it('refuses to cancel a paid order and leaves stock untouched', async () => {
+      const ctx = buildService();
+      ctx.state.order = {
+        id: 'order-1',
+        status: OrderStatus.CONFIRMED,
+        items: [{ variant_id: 'variant-a', quantity: 3 }],
+      };
+      ctx.state.payment = { id: 'payment-1' };
+
+      await expect(
+        ctx.service.updateStatus(
+          'order-1',
+          { status: OrderStatus.CANCELLED },
+          admin,
+        ),
+      ).rejects.toThrow(/already been paid/);
+      expect(ctx.manager.increment).not.toHaveBeenCalled();
+      expect(ctx.state.order.status).toBe(OrderStatus.CONFIRMED);
+    });
+
+    it('does not check payments for non-cancel transitions', async () => {
+      const ctx = buildService();
+      ctx.state.order = { id: 'order-1', status: OrderStatus.CONFIRMED };
+      ctx.state.payment = { id: 'payment-1' };
+
+      await ctx.service.updateStatus(
+        'order-1',
+        { status: OrderStatus.PROCESSING },
+        admin,
+      );
+
+      expect(ctx.state.order.status).toBe(OrderStatus.PROCESSING);
+      expect(ctx.manager.findOne).not.toHaveBeenCalledWith(
+        Payment,
+        expect.anything(),
       );
     });
 

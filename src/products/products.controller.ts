@@ -22,7 +22,7 @@ export class ProductsController {
   @ApiOperation({ summary: 'List products (paginated, filterable)' })
   @ApiOkResponse({ type: ProductPaginatedResponseDto })
   findAll(@Query() query: ProductListQueryDto) {
-    return this.productsService.findAll(query);
+    return this.productsService.findAll(query, { publishedOnly: true });
   }
 
   @Get('slug/:slug')
@@ -32,7 +32,7 @@ export class ProductsController {
   @ApiParam({ name: 'slug', example: 'iphone-15-pro' })
   @ApiOkResponse({ type: ProductResponseDto })
   findBySlug(@Param('slug') slug: string) {
-    return this.productsService.findBySlug(slug);
+    return this.productsService.findBySlug(slug, { publishedOnly: true });
   }
 
   @Get(':id')
@@ -40,7 +40,7 @@ export class ProductsController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: ProductResponseDto })
   findOne(@Param('id') id: string) {
-    return this.productsService.findOne(id);
+    return this.productsService.findOne(id, { publishedOnly: true });
   }
 }
 

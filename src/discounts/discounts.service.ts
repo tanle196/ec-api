@@ -30,6 +30,8 @@ export class DiscountsService {
     });
     if (existing) throw new ConflictException('Discount code already exists');
 
+    this.assertValidValue(dto.type, dto.value);
+
     const discount = this.discountRepo.create({
       ...dto,
       code: dto.code.toUpperCase(),
@@ -74,6 +76,13 @@ export class DiscountsService {
       if (conflict) throw new ConflictException('Discount code already exists');
       dto.code = dto.code.toUpperCase();
     }
+
+    // Checked against the merged result so changing only `type` (or only
+    // `value`) can't produce e.g. a 500% percent discount.
+    this.assertValidValue(
+      dto.type ?? discount.type,
+      dto.value ?? Number(discount.value),
+    );
 
     Object.assign(discount, dto);
     return this.discountRepo.save(discount);
@@ -138,10 +147,21 @@ export class DiscountsService {
   }
 
   computeAmount(discount: Discount, subtotal: number): number {
-    if (discount.type === DiscountType.PERCENT) {
-      return toMoney(new Big(subtotal).times(Number(discount.value)).div(100));
+    const amount =
+      discount.type === DiscountType.PERCENT
+        ? toMoney(new Big(subtotal).times(Number(discount.value)).div(100))
+        : toMoney(Number(discount.value));
+    // Never discount more than the subtotal, so an order total can't go
+    // negative even if a percent value above 100 slipped into the DB.
+    return Math.min(amount, subtotal);
+  }
+
+  private assertValidValue(type: DiscountType, value: number): void {
+    if (type === DiscountType.PERCENT && value > 100) {
+      throw new BadRequestException(
+        'Percent discount value must be between 0 and 100',
+      );
     }
-    return Math.min(toMoney(Number(discount.value)), subtotal);
   }
 
   /**

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -46,18 +47,29 @@ export class LocalStorageProvider implements IStorageProvider {
 
   delete(publicId: string): Promise<void> {
     const { uploadPath } = this.config.getMediaConfig().local;
-    // publicId format: "folder/uuid" or "uuid" — reconstruct glob by checking both
-    const candidates = [
-      path.join(uploadPath, `${publicId}.*`),
-      path.join(uploadPath, publicId),
-    ];
-
-    // Find actual file by listing the directory segment
-    const dir = path.join(uploadPath, path.dirname(publicId));
+    const root = path.resolve(uploadPath);
+    // publicId format: "folder/uuid" or "uuid"; the stored file is "<uuid><ext>"
+    const dir = path.resolve(root, path.dirname(publicId));
     const base = path.basename(publicId);
 
+    // publicId comes from the request path, so it must not be able to point
+    // outside the upload directory (e.g. "../../etc/x") or match every file
+    // in a folder (an empty/"."/".." basename).
+    if (
+      (dir !== root && !dir.startsWith(root + path.sep)) ||
+      !base ||
+      base === '.' ||
+      base === '..'
+    ) {
+      return Promise.reject(new BadRequestException('Invalid publicId'));
+    }
+
     if (fs.existsSync(dir)) {
-      const files = fs.readdirSync(dir).filter((f) => f.startsWith(base));
+      // Exact match on "<base>" or "<base>.<ext>" — a plain prefix match
+      // would also delete unrelated files that merely start with `base`.
+      const files = fs
+        .readdirSync(dir)
+        .filter((f) => f === base || f.startsWith(`${base}.`));
       for (const f of files) {
         try {
           fs.unlinkSync(path.join(dir, f));
@@ -66,9 +78,7 @@ export class LocalStorageProvider implements IStorageProvider {
         }
       }
     } else {
-      this.logger.warn(
-        `Delete skipped — directory not found: ${dir} (candidates: ${JSON.stringify(candidates)})`,
-      );
+      this.logger.warn(`Delete skipped — directory not found: ${dir}`);
     }
 
     return Promise.resolve();

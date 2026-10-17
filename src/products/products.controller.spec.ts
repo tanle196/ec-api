@@ -41,24 +41,40 @@ describe('Product controllers', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it.each([
-    [ProductsController, ['findAll', [{ page: 1 }]]],
-    [ProductsController, ['findBySlug', ['ao-thun']]],
-    [ProductsController, ['findOne', ['product-1']]],
-    [TagsController, ['findAllTags', []]],
-    [TagsController, ['findTagBySlug', ['sale']]],
+    ['findAll', [{ page: 1 }]],
+    ['findBySlug', ['ao-thun']],
+    ['findOne', ['product-1']],
   ] as const)(
-    '%p public endpoint %p delegates',
-    async (cls, [method, args]) => {
-      const controller = new cls(service as never) as unknown as Record<
-        string,
-        Callable
-      >;
+    'public ProductsController.%s only exposes published products',
+    async (method, args) => {
+      const controller = new ProductsController(
+        service as never,
+      ) as unknown as Record<string, Callable>;
 
-      expect(Reflect.getMetadata(GUARDS_METADATA, cls)).toBeUndefined();
+      expect(
+        Reflect.getMetadata(GUARDS_METADATA, ProductsController),
+      ).toBeUndefined();
       await expect(controller[method](...args)).resolves.toBe(method);
-      expect(service[method]).toHaveBeenCalledWith(...args);
+      expect(service[method]).toHaveBeenCalledWith(...args, {
+        publishedOnly: true,
+      });
     },
   );
+
+  it.each([
+    ['findAllTags', []],
+    ['findTagBySlug', ['sale']],
+  ] as const)('public TagsController.%s delegates', async (method, args) => {
+    const controller = new TagsController(
+      service as never,
+    ) as unknown as Record<string, Callable>;
+
+    expect(
+      Reflect.getMetadata(GUARDS_METADATA, TagsController),
+    ).toBeUndefined();
+    await expect(controller[method](...args)).resolves.toBe(method);
+    expect(service[method]).toHaveBeenCalledWith(...args);
+  });
 
   describe('AdminProductsController', () => {
     const controller = new AdminProductsController(

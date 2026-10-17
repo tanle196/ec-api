@@ -217,6 +217,20 @@ describe('ProductsService', () => {
       expect(qb.andWhere).not.toHaveBeenCalled();
       expect(qb.take).toHaveBeenCalledWith(20);
     });
+
+    it('publishedOnly forces PUBLISHED and ignores the client status filter', async () => {
+      const { service, qb } = buildService();
+
+      await service.findAll(
+        { status: ProductStatus.DRAFT },
+        { publishedOnly: true },
+      );
+
+      expect(qb.andWhere).toHaveBeenCalledTimes(1);
+      expect(qb.andWhere).toHaveBeenCalledWith('p.status = :status', {
+        status: ProductStatus.PUBLISHED,
+      });
+    });
   });
 
   describe.each([
@@ -238,6 +252,19 @@ describe('ProductsService', () => {
       const { service } = buildService();
 
       await expect(service[method]('x')).rejects.toThrow(NotFoundException);
+    });
+
+    it('publishedOnly restricts the lookup to PUBLISHED products', async () => {
+      const { service, productRepo } = buildService();
+
+      // A draft product doesn't match the PUBLISHED-scoped query → 404.
+      await expect(
+        service[method]('x', { publishedOnly: true }),
+      ).rejects.toThrow(NotFoundException);
+      expect(productRepo.findOne).toHaveBeenCalledWith({
+        where: { ...where, status: ProductStatus.PUBLISHED },
+        relations: ['images', 'variants', 'tags', 'category'],
+      });
     });
   });
 

@@ -95,8 +95,12 @@ export class ProductsService {
     return this.findOne(saved.id);
   }
 
+  // `publishedOnly` is set by the public storefront endpoints so DRAFT and
+  // ARCHIVED products are never exposed, regardless of the `status` filter
+  // the client sends. Admin endpoints leave it off to see everything.
   async findAll(
     query: ProductListQueryDto,
+    { publishedOnly = false }: { publishedOnly?: boolean } = {},
   ): Promise<PaginatedResponseDto<ProductListItemDto>> {
     const {
       page = 1,
@@ -112,7 +116,11 @@ export class ProductsService {
     if (name) qb.andWhere('p.name ILIKE :name', { name: `%${name}%` });
     if (category_id)
       qb.andWhere('p.category_id = :category_id', { category_id });
-    if (status) qb.andWhere('p.status = :status', { status });
+    if (publishedOnly) {
+      qb.andWhere('p.status = :status', { status: ProductStatus.PUBLISHED });
+    } else if (status) {
+      qb.andWhere('p.status = :status', { status });
+    }
     if (isFeatured !== undefined)
       qb.andWhere('p.isFeatured = :isFeatured', { isFeatured });
 
@@ -125,18 +133,26 @@ export class ProductsService {
     return { data, total, page, limit };
   }
 
-  async findOne(id: string): Promise<Product> {
+  async findOne(
+    id: string,
+    { publishedOnly = false }: { publishedOnly?: boolean } = {},
+  ): Promise<Product> {
     const product = await this.productRepo.findOne({
-      where: { id },
+      where: publishedOnly ? { id, status: ProductStatus.PUBLISHED } : { id },
       relations: ['images', 'variants', 'tags', 'category'],
     });
     if (!product) throw new NotFoundException('Product not found');
     return product;
   }
 
-  async findBySlug(slug: string): Promise<Product> {
+  async findBySlug(
+    slug: string,
+    { publishedOnly = false }: { publishedOnly?: boolean } = {},
+  ): Promise<Product> {
     const product = await this.productRepo.findOne({
-      where: { slug },
+      where: publishedOnly
+        ? { slug, status: ProductStatus.PUBLISHED }
+        : { slug },
       relations: ['images', 'variants', 'tags', 'category'],
     });
     if (!product) throw new NotFoundException('Product not found');
