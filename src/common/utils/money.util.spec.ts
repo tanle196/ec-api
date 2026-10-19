@@ -1,5 +1,10 @@
 import Big from 'big.js';
-import { MONEY_DECIMAL_PLACES, toMoney } from './money.util';
+import {
+  formatMoney,
+  MONEY_DECIMAL_PLACES,
+  moneyTransformer,
+  toMoney,
+} from './money.util';
 
 describe('toMoney', () => {
   it('uses 2 decimal places', () => {
@@ -25,5 +30,37 @@ describe('toMoney', () => {
 
   it('throws on non-numeric input', () => {
     expect(() => toMoney('abc')).toThrow();
+  });
+});
+
+describe('formatMoney', () => {
+  it('formats 2-decimal currencies with 2 decimals', () => {
+    expect(formatMoney(10.5, 'usd')).toBe('$10.50');
+  });
+
+  it('formats VND without decimals using the vi-VN locale', () => {
+    expect(formatMoney(150000, 'vnd')).toBe('150.000\u00a0₫');
+  });
+
+  it('rounds half-up before formatting', () => {
+    expect(formatMoney('1.005', 'usd')).toBe('$1.01');
+  });
+
+  it('accepts a Big instance', () => {
+    expect(formatMoney(new Big(0.1).plus(0.2), 'usd')).toBe('$0.30');
+  });
+});
+
+describe('moneyTransformer', () => {
+  it('converts decimal strings from the database into numbers', () => {
+    expect(moneyTransformer.from('49.99')).toBe(49.99);
+  });
+
+  it('passes nulls through', () => {
+    expect(moneyTransformer.from(null)).toBeNull();
+  });
+
+  it('writes values unchanged', () => {
+    expect(moneyTransformer.to(10)).toBe(10);
   });
 });

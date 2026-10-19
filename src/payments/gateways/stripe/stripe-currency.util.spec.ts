@@ -12,6 +12,11 @@ describe('stripe-currency.util', () => {
       expect(toStripeAmount(0.1 + 0.2, 'EUR')).toBe(30);
     });
 
+    it('rounds half-up without float drift', () => {
+      // 1.005 * 100 === 100.49999999999999 in plain float math
+      expect(toStripeAmount(1.005, 'usd')).toBe(101);
+    });
+
     it('multiplies three-decimal currencies by 1000', () => {
       expect(toStripeAmount(1.234, 'kwd')).toBe(1234);
     });

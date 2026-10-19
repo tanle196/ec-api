@@ -1,3 +1,5 @@
+import Big from 'big.js';
+
 // Stripe's zero-decimal currencies — the smallest unit already IS the
 // display unit, so no *100 conversion is applied.
 // https://docs.stripe.com/currencies#zero-decimal
@@ -36,10 +38,9 @@ const THREE_DECIMAL_CURRENCIES = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
  */
 export function toStripeAmount(amount: number, currency: string): number {
   const normalized = currency.toLowerCase();
-  if (ZERO_DECIMAL_CURRENCIES.has(normalized)) return Math.round(amount);
-  if (THREE_DECIMAL_CURRENCIES.has(normalized))
-    return Math.round(amount * 1000);
-  return Math.round(amount * 100);
+  // Big avoids float drift in the multiplication (e.g. 1.005 * 100 ===
+  // 100.49999999999999 would otherwise round down a unit).
+  return new Big(amount).times(minorUnitFactor(normalized)).round(0).toNumber();
 }
 
 /**
@@ -50,7 +51,11 @@ export function toStripeAmount(amount: number, currency: string): number {
  */
 export function fromStripeAmount(units: number, currency: string): number {
   const normalized = currency.toLowerCase();
-  if (ZERO_DECIMAL_CURRENCIES.has(normalized)) return units;
-  if (THREE_DECIMAL_CURRENCIES.has(normalized)) return units / 1000;
-  return units / 100;
+  return new Big(units).div(minorUnitFactor(normalized)).toNumber();
+}
+
+function minorUnitFactor(normalizedCurrency: string): number {
+  if (ZERO_DECIMAL_CURRENCIES.has(normalizedCurrency)) return 1;
+  if (THREE_DECIMAL_CURRENCIES.has(normalizedCurrency)) return 1000;
+  return 100;
 }

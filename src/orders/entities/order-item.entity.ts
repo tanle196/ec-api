@@ -2,6 +2,7 @@ import { ProductVariant } from '@/products/entities/product-variant.entity';
 import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
 import { AbstractIdEntity } from '@/common/entities/base.entity';
 import { Order } from './order.entity';
+import { moneyTransformer } from '@/common/utils/money.util';
 
 @Entity('order_items')
 export class OrderItem extends AbstractIdEntity {
@@ -25,12 +26,22 @@ export class OrderItem extends AbstractIdEntity {
   @Column({ type: 'varchar', nullable: true })
   variantName!: string | null;
 
-  @Column({ type: 'decimal', precision: 12, scale: 2 })
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    transformer: moneyTransformer,
+  })
   unitPrice!: number;
 
   @Column({ type: 'int' })
   quantity!: number;
 
-  @Column({ type: 'decimal', precision: 12, scale: 2 })
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    transformer: moneyTransformer,
+  })
   total!: number;
 }

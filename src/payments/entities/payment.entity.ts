@@ -3,6 +3,7 @@ import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
 import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import { PaymentMethod } from '../enums/payment-method.enum';
 import { PaymentStatus } from '../enums/payment-status.enum';
+import { moneyTransformer } from '@/common/utils/money.util';
 
 @Entity('payments')
 export class Payment extends AbstractBaseEntity {
@@ -23,7 +24,12 @@ export class Payment extends AbstractBaseEntity {
   })
   status!: PaymentStatus;
 
-  @Column({ type: 'decimal', precision: 12, scale: 2 })
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    transformer: moneyTransformer,
+  })
   amount!: number;
 
   @Column({ type: 'varchar', nullable: true })

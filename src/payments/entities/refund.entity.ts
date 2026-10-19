@@ -4,6 +4,7 @@ import { Order } from '@/orders/entities/order.entity';
 import { Payment } from './payment.entity';
 import { RefundItem } from './refund-item.entity';
 import { RefundStatus } from '../enums/refund-status.enum';
+import { moneyTransformer } from '@/common/utils/money.util';
 
 @Entity('refunds')
 export class Refund extends AbstractBaseEntity {
@@ -21,7 +22,12 @@ export class Refund extends AbstractBaseEntity {
   @JoinColumn({ name: 'order_id' })
   order!: Order;
 
-  @Column({ type: 'decimal', precision: 12, scale: 2 })
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    transformer: moneyTransformer,
+  })
   amount!: number;
 
   @Column({ type: 'text' })

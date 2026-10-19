@@ -1,10 +1,11 @@
 import { MailService } from './mail.service';
 
 describe('MailService', () => {
-  const buildService = () => {
+  const buildService = (currency = 'usd') => {
     const mailerService = { sendMail: jest.fn().mockResolvedValue(undefined) };
+    const config = { getStripeConfig: () => ({ currency }) };
     return {
-      service: new MailService(mailerService as never),
+      service: new MailService(mailerService as never, config as never),
       sendMail: mailerService.sendMail,
     };
   };
@@ -36,7 +37,7 @@ describe('MailService', () => {
     });
   });
 
-  it('formats money with 2 decimals in the order confirmation', async () => {
+  it('formats money in the configured currency in the order confirmation', async () => {
     const { service, sendMail } = buildService();
 
     await service.sendOrderConfirmation('a@example.com', {
@@ -68,17 +69,31 @@ describe('MailService', () => {
             productName: 'Áo',
             variantName: 'M',
             quantity: 2,
-            unitPrice: '50.00',
-            total: '100.00',
+            unitPrice: '$50.00',
+            total: '$100.00',
           },
         ],
-        subtotal: '100.00',
-        shippingFee: '10.50',
-        discount: '0.00',
-        total: '110.50',
+        subtotal: '$100.00',
+        shippingFee: '$10.50',
+        discount: '$0.00',
+        total: '$110.50',
         year,
       },
     });
+  });
+
+  it('formats VND without decimals', async () => {
+    const { service, sendMail } = buildService('vnd');
+
+    await service.sendRefundRequestReceived('a@example.com', {
+      reason: 'damaged',
+      amount: 150000,
+    });
+
+    const [{ context }] = sendMail.mock.calls[0] as [
+      { context: { amount: string } },
+    ];
+    expect(context.amount).toBe('150.000\u00a0₫');
   });
 
   it('sends the order status update', async () => {
@@ -139,7 +154,7 @@ describe('MailService', () => {
       context: {
         email: 'a@example.com',
         reason: 'damaged',
-        amount: '25.00',
+        amount: '$25.00',
         ...(includesNote ? { adminNote: 'ok' } : {}),
         year,
       },

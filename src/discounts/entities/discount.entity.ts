@@ -2,6 +2,7 @@ import { Column, Entity, ManyToMany } from 'typeorm';
 import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import type { Order } from '@/orders/entities/order.entity';
 import { DiscountType } from '../enums/discount-type.enum';
+import { moneyTransformer } from '@/common/utils/money.util';
 
 @Entity('discounts')
 export class Discount extends AbstractBaseEntity {
@@ -11,10 +12,21 @@ export class Discount extends AbstractBaseEntity {
   @Column({ type: 'enum', enum: DiscountType })
   type!: DiscountType;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    transformer: moneyTransformer,
+  })
   value!: number;
 
-  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+    transformer: moneyTransformer,
+  })
   minOrderValue!: number | null;
 
   @Column({ type: 'int', nullable: true })

@@ -1,6 +1,7 @@
 import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
 import { AbstractBaseEntity } from '@/common/entities/base.entity';
 import { Product } from './product.entity';
+import { moneyTransformer } from '@/common/utils/money.util';
 
 @Entity('product_variants')
 export class ProductVariant extends AbstractBaseEntity {
@@ -21,10 +22,7 @@ export class ProductVariant extends AbstractBaseEntity {
     type: 'decimal',
     precision: 12,
     scale: 2,
-    transformer: {
-      to: (v: number) => v,
-      from: (v: string) => parseFloat(v),
-    },
+    transformer: moneyTransformer,
   })
   price!: number;
 

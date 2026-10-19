@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { MailerService } from '@nestjs-modules/mailer';
+import { TypedConfigService } from '@/config/TypedConfigService';
+import { formatMoney } from '@/common/utils/money.util';
 
 export interface OrderConfirmationItem {
   productName: string;
@@ -32,7 +34,14 @@ export interface RefundRequestDetails {
 
 @Injectable()
 export class MailService {
-  constructor(private readonly mailerService: MailerService) {}
+  constructor(
+    private readonly mailerService: MailerService,
+    private readonly config: TypedConfigService,
+  ) {}
+
+  private formatAmount(value: number): string {
+    return formatMoney(value, this.config.getStripeConfig().currency);
+  }
 
   async sendVerificationEmail(email: string, verifyUrl: string): Promise<void> {
     await this.mailerService.sendMail({
@@ -73,13 +82,13 @@ export class MailService {
         orderNumber: order.orderNumber,
         items: order.items.map((item) => ({
           ...item,
-          unitPrice: item.unitPrice.toFixed(2),
-          total: item.total.toFixed(2),
+          unitPrice: this.formatAmount(item.unitPrice),
+          total: this.formatAmount(item.total),
         })),
-        subtotal: order.subtotal.toFixed(2),
-        shippingFee: order.shippingFee.toFixed(2),
-        discount: order.discount.toFixed(2),
-        total: order.total.toFixed(2),
+        subtotal: this.formatAmount(order.subtotal),
+        shippingFee: this.formatAmount(order.shippingFee),
+        discount: this.formatAmount(order.discount),
+        total: this.formatAmount(order.total),
         year: new Date().getFullYear().toString(),
       },
     });
@@ -114,7 +123,7 @@ export class MailService {
       context: {
         email,
         reason: details.reason,
-        amount: details.amount.toFixed(2),
+        amount: this.formatAmount(details.amount),
         year: new Date().getFullYear().toString(),
       },
     });
@@ -131,7 +140,7 @@ export class MailService {
       context: {
         email,
         reason: details.reason,
-        amount: details.amount.toFixed(2),
+        amount: this.formatAmount(details.amount),
         adminNote: details.adminNote,
         year: new Date().getFullYear().toString(),
       },
@@ -149,7 +158,7 @@ export class MailService {
       context: {
         email,
         reason: details.reason,
-        amount: details.amount.toFixed(2),
+        amount: this.formatAmount(details.amount),
         adminNote: details.adminNote,
         year: new Date().getFullYear().toString(),
       },

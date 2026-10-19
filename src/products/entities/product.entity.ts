@@ -13,6 +13,7 @@ import { ProductStatus } from '../enums/product-status.enum';
 import { ProductImage } from './product-image.entity';
 import { ProductVariant } from './product-variant.entity';
 import { Tag } from './tag.entity';
+import { moneyTransformer } from '@/common/utils/money.util';
 
 @Entity('products')
 export class Product extends AbstractBaseEntity {
@@ -32,7 +33,12 @@ export class Product extends AbstractBaseEntity {
   @Column({ type: 'text', nullable: true })
   description!: string | null;
 
-  @Column({ type: 'decimal', precision: 12, scale: 2 })
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    transformer: moneyTransformer,
+  })
   basePrice!: number;
 
   @Column({ unique: true })

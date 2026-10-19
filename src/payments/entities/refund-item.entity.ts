@@ -2,6 +2,7 @@ import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
 import { AbstractIdEntity } from '@/common/entities/base.entity';
 import { OrderItem } from '@/orders/entities/order-item.entity';
 import { Refund } from './refund.entity';
+import { moneyTransformer } from '@/common/utils/money.util';
 
 @Entity('refund_items')
 export class RefundItem extends AbstractIdEntity {
@@ -22,6 +23,11 @@ export class RefundItem extends AbstractIdEntity {
   @Column({ type: 'int' })
   quantity!: number;
 
-  @Column({ type: 'decimal', precision: 12, scale: 2 })
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    transformer: moneyTransformer,
+  })
   amount!: number;
 }

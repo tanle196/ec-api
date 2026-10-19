@@ -5,6 +5,7 @@ import { Payment } from './payment.entity';
 import { Refund } from './refund.entity';
 import { RefundRequestItem } from './refund-request-item.entity';
 import { RefundRequestStatus } from '../enums/refund-request-status.enum';
+import { moneyTransformer } from '@/common/utils/money.util';
 
 @Entity('refund_requests')
 export class RefundRequest extends AbstractBaseEntity {
@@ -25,7 +26,12 @@ export class RefundRequest extends AbstractBaseEntity {
   @Column({ type: 'uuid' })
   requested_by!: string;
 
-  @Column({ type: 'decimal', precision: 12, scale: 2 })
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    transformer: moneyTransformer,
+  })
   amount!: number;
 
   @Column({ type: 'text' })
