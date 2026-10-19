@@ -20,6 +20,7 @@ import type { CurrentUser as ICurrentUser } from '@/common/interfaces/current-us
 import { UserProfileDto } from '@/users/dto/user-profile.dto';
 import { UsersService } from '@/users/users.service';
 import { AuthService } from './auth.service';
+import { AuthPolicy } from './policies/auth.policy';
 import { ActiveDto } from './dtos/active.dto';
 import { ForgotPasswordDto } from './dtos/forgot-password.dto';
 import { LoginDto } from './dtos/login.dto';
@@ -37,6 +38,7 @@ export class AdminAuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly usersService: UsersService,
+    private readonly authPolicy: AuthPolicy,
   ) {}
 
   @Post('login')
@@ -63,7 +65,7 @@ export class AdminAuthController {
     type: UserProfileDto,
   })
   async me(@CurrentUser() user: ICurrentUser): Promise<UserProfileDto> {
-    this.authService.assertAdminRole(user.roles);
+    this.authPolicy.assertAdminRole(user.roles);
     const profile = await this.usersService.getUserProfile(user.id!);
     if (!profile) {
       throw new NotFoundException('User not found');
@@ -98,7 +100,7 @@ export class AdminAuthController {
     if (!user.id || !user.refreshJti) {
       throw new UnauthorizedException();
     }
-    this.authService.assertAdminRole(user.roles);
+    this.authPolicy.assertAdminRole(user.roles);
     return this.authService.rotateRefreshToken(user.id, user.refreshJti);
   }
 

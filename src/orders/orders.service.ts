@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -41,6 +40,7 @@ import { OrderItem } from './entities/order-item.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderStatus } from './enums/order-status.enum';
 import { OrderStatusChangeActor } from './enums/order-status-change-actor.enum';
+import { OrderPolicy } from './policies/order.policy';
 
 interface ResolvedOrderItem {
   variant_id: string;
@@ -50,28 +50,6 @@ interface ResolvedOrderItem {
   quantity: number;
   total: number;
 }
-
-const CANCELLABLE_STATUSES: OrderStatus[] = [
-  OrderStatus.PENDING,
-  OrderStatus.CONFIRMED,
-];
-
-// Valid forward-moving transitions for admin status updates; anything not
-// listed here (e.g. moving backwards, or out of a terminal status) is rejected.
-// REFUNDED / PARTIALLY_REFUNDED are deliberately absent: they're derived
-// from real Refund records and only set by the payment refund flow (via
-// applyStatusChange). Letting an admin set them here would mark an order
-// refunded without any money actually being returned.
-const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
-  [OrderStatus.CONFIRMED]: [OrderStatus.PROCESSING, OrderStatus.CANCELLED],
-  [OrderStatus.PROCESSING]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
-  [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED],
-  [OrderStatus.DELIVERED]: [],
-  [OrderStatus.CANCELLED]: [],
-  [OrderStatus.PARTIALLY_REFUNDED]: [],
-  [OrderStatus.REFUNDED]: [],
-};
 
 @Injectable()
 export class OrdersService {
@@ -94,6 +72,7 @@ export class OrdersService {
     private readonly cartsService: CartsService,
     private readonly mailService: MailService,
     private readonly usersService: UsersService,
+    private readonly orderPolicy: OrderPolicy,
   ) {}
 
   async create(userId: string, dto: CreateOrderDto): Promise<Order> {
@@ -145,9 +124,7 @@ export class OrdersService {
 
     const cart = await this.cartsService.getCart(userId);
 
-    if (!cart.items.length) {
-      throw new BadRequestException('Cart is empty');
-    }
+    this.orderPolicy.assertCartNotEmpty(cart.items);
 
     const items = cart.items.map((item) => ({
       variant_id: item.variant_id,
@@ -207,10 +184,7 @@ export class OrdersService {
       const variant = variantMap.get(item.variant_id);
       if (!variant)
         throw new NotFoundException(`Variant ${item.variant_id} not found`);
-      if (!variant.isActive)
-        throw new UnprocessableEntityException(
-          `Variant ${variant.sku} is inactive`,
-        );
+      this.orderPolicy.assertVariantOrderable(variant);
 
       const unitPrice = Number(variant.price);
       const itemTotal = new Big(unitPrice)
@@ -402,7 +376,7 @@ export class OrdersService {
   async findOne(id: string, userId?: string): Promise<Order> {
     const order = await this.findOrderOrThrow(this.orderRepo.manager, id);
 
-    if (userId && order.user_id !== userId) throw new ForbiddenException();
+    if (userId) this.orderPolicy.assertOwnedBy(order, userId);
 
     return order;
   }
@@ -414,11 +388,7 @@ export class OrdersService {
   ): Promise<Order> {
     const order = await this.findOne(id, userId);
 
-    if (order.status !== OrderStatus.PENDING) {
-      throw new BadRequestException(
-        `Cannot edit an order with status "${order.status}"`,
-      );
-    }
+    this.orderPolicy.assertEditable(order);
 
     let addressId = order.address_id;
     if (dto.address_id && dto.address_id !== order.address_id) {
@@ -451,14 +421,7 @@ export class OrdersService {
 
         let discountAmount = new Big(0);
         for (const discount of order.discounts) {
-          if (
-            discount.minOrderValue !== null &&
-            subtotal < Number(discount.minOrderValue)
-          ) {
-            throw new BadRequestException(
-              `Order no longer meets the minimum value for discount code "${discount.code}"`,
-            );
-          }
+          this.orderPolicy.assertStillMeetsDiscountMinimum(discount, subtotal);
           discountAmount = discountAmount.plus(
             this.discountsService.computeAmount(discount, subtotal),
           );
@@ -518,15 +481,10 @@ export class OrdersService {
           lock: { mode: 'pessimistic_write' },
         });
         if (!order) throw new NotFoundException('Order not found');
-        if (order.user_id !== userId) throw new ForbiddenException();
+        this.orderPolicy.assertOwnedBy(order, userId);
+        this.orderPolicy.assertCancellable(order);
 
-        if (!CANCELLABLE_STATUSES.includes(order.status)) {
-          throw new BadRequestException(
-            `Cannot cancel order with status "${order.status}"`,
-          );
-        }
-
-        // CANCELLABLE_STATUSES includes CONFIRMED, which is also the status
+        // The cancellable statuses include CONFIRMED, which is also the status
         // a completed payment puts the order in — without this check, a
         // customer could self-cancel (and get stock silently restored for)
         // an order that was already actually paid, with no refund ever
@@ -576,12 +534,7 @@ export class OrdersService {
         });
         if (!order) throw new NotFoundException('Order not found');
 
-        const allowedNext = ALLOWED_TRANSITIONS[order.status];
-        if (!allowedNext.includes(dto.status)) {
-          throw new BadRequestException(
-            `Cannot transition order from "${order.status}" to "${dto.status}"`,
-          );
-        }
+        this.orderPolicy.assertCanTransition(order.status, dto.status);
 
         const fromStatus = order.status;
 
@@ -661,23 +614,13 @@ export class OrdersService {
       if (!order) throw new NotFoundException('Order not found');
       if (order.status === toStatus) return { order, fromStatus: null };
 
-      // A payment-confirmation event (the only caller that ever targets
-      // CONFIRMED here) only makes sense while the order is still PENDING.
-      // Unlike updateStatus(), this method enforces no transition table at
-      // all — without this guard, a redelivered/reprocessed webhook event
-      // (see the webhook controller's RECEIVED-reprocessing) arriving after
-      // the order already legitimately moved on to PROCESSING/SHIPPED/... —
-      // or was CANCELLED — would silently force it backward, corrupting
-      // fulfillment state. Treated as a no-op rather than an error so the
-      // caller (e.g. PaymentsService.completeFromGatewayEvent) still
-      // persists the payment itself as COMPLETED; only this redundant
-      // order-status bump is skipped.
+      // No-op rather than an error so the caller (e.g.
+      // PaymentsService.completeFromGatewayEvent) still persists the payment
+      // itself; only the stale order-status bump is skipped.
       if (
-        toStatus === OrderStatus.CONFIRMED &&
-        order.status !== OrderStatus.PENDING
-      ) {
+        !this.orderPolicy.canApplyExternalStatusChange(order.status, toStatus)
+      )
         return { order, fromStatus: null };
-      }
 
       const fromStatus = order.status;
       order.status = toStatus;

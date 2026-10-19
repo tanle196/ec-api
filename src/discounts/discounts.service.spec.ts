@@ -1,3 +1,4 @@
+import { DiscountPolicy } from './policies/discount.policy';
 import {
   BadRequestException,
   ConflictException,
@@ -28,7 +29,10 @@ describe('DiscountsService', () => {
       save: jest.fn((d: object) => Promise.resolve(d)),
       remove: jest.fn().mockResolvedValue(undefined),
     };
-    return { service: new DiscountsService(repo as never), repo };
+    return {
+      service: new DiscountsService(repo as never, new DiscountPolicy()),
+      repo,
+    };
   };
 
   describe('create', () => {

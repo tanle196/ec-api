@@ -17,6 +17,7 @@ import {
 } from './dto/category-response.dto';
 import { MediaService } from '@/media/media.service';
 import { generateUniqueSlug } from '@/common/utils/slug.util';
+import { CategoryPolicy } from './policies/category.policy';
 
 @Injectable()
 export class CategoriesService {
@@ -26,6 +27,7 @@ export class CategoriesService {
     @InjectRepository(Category)
     private readonly repo: Repository<Category>,
     private readonly mediaService: MediaService,
+    private readonly categoryPolicy: CategoryPolicy,
   ) {}
 
   async create(dto: CreateCategoryDto): Promise<Category> {
@@ -128,9 +130,7 @@ export class CategoriesService {
     }
 
     if (dto.parent_id !== undefined && dto.parent_id !== category.parent_id) {
-      if (dto.parent_id === id) {
-        throw new ConflictException('A category cannot be its own parent');
-      }
+      this.categoryPolicy.assertNotOwnParent(id, dto.parent_id);
       if (dto.parent_id) {
         const parent = await this.repo.findOne({
           where: { id: dto.parent_id },
@@ -202,10 +202,8 @@ export class CategoriesService {
   async remove(id: string): Promise<{ success: boolean }> {
     const category = await this.findOne(id);
 
-    const hasChildren = await this.repo.count({ where: { parent_id: id } });
-    if (hasChildren > 0) {
-      throw new ConflictException('Cannot delete a category that has children');
-    }
+    const childCount = await this.repo.count({ where: { parent_id: id } });
+    this.categoryPolicy.assertCanDelete(childCount);
 
     await this.repo.remove(category);
     return { success: true };

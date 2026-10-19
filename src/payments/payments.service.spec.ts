@@ -1,3 +1,4 @@
+import { PaymentPolicy } from './policies/payment.policy';
 import { OrderStatusChangeActor } from '@/orders/enums/order-status-change-actor.enum';
 import { OrderStatus } from '@/orders/enums/order-status.enum';
 import { PaymentsService } from './payments.service';
@@ -76,6 +77,7 @@ describe('PaymentsService', () => {
       dataSource as never,
       ordersService as never,
       gatewayRegistry as never,
+      new PaymentPolicy(),
     );
 
     return {

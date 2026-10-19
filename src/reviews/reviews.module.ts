@@ -9,6 +9,7 @@ import { AdminReviewsController } from './admin-reviews.controller';
 import { ReviewsService } from './reviews.service';
 import { Product } from '@/products/entities/product.entity';
 import { Order } from '@/orders/entities/order.entity';
+import { ReviewPolicy } from './policies/review.policy';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Review, Product, Order])],
@@ -17,6 +18,6 @@ import { Order } from '@/orders/entities/order.entity';
     ProductReviewsController,
     AdminReviewsController,
   ],
-  providers: [ReviewsService],
+  providers: [ReviewsService, ReviewPolicy],
 })
 export class ReviewsModule {}

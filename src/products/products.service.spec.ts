@@ -1,5 +1,10 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ProductStatus } from './enums/product-status.enum';
+import { ProductPolicy } from './policies/product.policy';
 import { ProductsService } from './products.service';
 
 describe('ProductsService', () => {
@@ -65,6 +70,7 @@ describe('ProductsService', () => {
       variantRepo as never,
       tagRepo as never,
       mediaService as never,
+      new ProductPolicy(),
     );
     jest.spyOn(service['logger'], 'warn').mockImplementation(() => undefined);
     return {
@@ -114,6 +120,15 @@ describe('ProductsService', () => {
       });
       expect(ctx.imageRepo.save).not.toHaveBeenCalled();
       expect(ctx.variantRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects creating a published product without images', async () => {
+      const ctx = buildService();
+
+      await expect(
+        ctx.service.create({ ...dto, status: ProductStatus.PUBLISHED }),
+      ).rejects.toThrow(BadRequestException);
+      expect(ctx.productRepo.save).not.toHaveBeenCalled();
     });
 
     it('saves images, variants and tags linked to the new product', async () => {
@@ -316,7 +331,10 @@ describe('ProductsService', () => {
 
     it('replaces tags and scalar fields', async () => {
       const ctx = buildService();
-      withExistingProduct(ctx.productRepo);
+      withExistingProduct(ctx.productRepo, {
+        ...product,
+        images: [{ id: 'img-1' }],
+      });
       ctx.tagRepo.find.mockResolvedValue([{ id: 'tag-1' }]);
 
       const result = await ctx.service.update('product-1', {
@@ -341,6 +359,42 @@ describe('ProductsService', () => {
       );
     });
 
+    it('rejects publishing a product without images', async () => {
+      const ctx = buildService();
+      withExistingProduct(ctx.productRepo, { ...product, images: [] });
+
+      await expect(
+        ctx.service.update('product-1', { status: ProductStatus.PUBLISHED }),
+      ).rejects.toThrow(BadRequestException);
+      expect(ctx.productRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a disallowed status transition', async () => {
+      const ctx = buildService();
+      withExistingProduct(ctx.productRepo, {
+        ...product,
+        status: ProductStatus.ARCHIVED,
+        images: [{ id: 'img-1' }],
+      });
+
+      await expect(
+        ctx.service.update('product-1', { status: ProductStatus.PUBLISHED }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects dropping the price of a published product to 0', async () => {
+      const ctx = buildService();
+      withExistingProduct(ctx.productRepo, {
+        ...product,
+        status: ProductStatus.PUBLISHED,
+        images: [{ id: 'img-1' }],
+      });
+
+      await expect(
+        ctx.service.update('product-1', { basePrice: 0 }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('clears tags with an empty list', async () => {
       const ctx = buildService();
       withExistingProduct(ctx.productRepo, { ...product, tags: [{ id: 't' }] });
@@ -360,6 +414,19 @@ describe('ProductsService', () => {
       success: true,
     });
     expect(productRepo.remove).toHaveBeenCalledWith(product);
+  });
+
+  it('remove rejects a published product', async () => {
+    const { service, productRepo } = buildService();
+    productRepo.findOne.mockResolvedValue({
+      ...product,
+      status: ProductStatus.PUBLISHED,
+    });
+
+    await expect(service.remove('product-1')).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(productRepo.remove).not.toHaveBeenCalled();
   });
 
   describe('images', () => {
@@ -447,7 +514,8 @@ describe('ProductsService', () => {
     });
 
     it('removeImage deletes the cloud asset and the row', async () => {
-      const { service, imageRepo, mediaService } = buildService();
+      const { service, productRepo, imageRepo, mediaService } = buildService();
+      productRepo.findOne.mockResolvedValue(product);
       const image = { id: 'img-1', publicId: 'p/x' };
       imageRepo.findOne.mockResolvedValue(image);
 
@@ -462,7 +530,8 @@ describe('ProductsService', () => {
     });
 
     it('removeImage still removes the row when cloud deletion fails', async () => {
-      const { service, imageRepo, mediaService } = buildService();
+      const { service, productRepo, imageRepo, mediaService } = buildService();
+      productRepo.findOne.mockResolvedValue(product);
       imageRepo.findOne.mockResolvedValue({ id: 'img-1', publicId: 'p/x' });
       mediaService.delete.mockRejectedValue(new Error('cdn'));
 
@@ -473,12 +542,28 @@ describe('ProductsService', () => {
     });
 
     it('removeImage skips the CDN for images without publicId', async () => {
-      const { service, imageRepo, mediaService } = buildService();
+      const { service, productRepo, imageRepo, mediaService } = buildService();
+      productRepo.findOne.mockResolvedValue(product);
       imageRepo.findOne.mockResolvedValue({ id: 'img-1', publicId: null });
 
       await service.removeImage('product-1', 'img-1');
 
       expect(mediaService.delete).not.toHaveBeenCalled();
+    });
+
+    it('removeImage rejects removing the last image of a published product', async () => {
+      const { service, productRepo, imageRepo } = buildService();
+      productRepo.findOne.mockResolvedValue({
+        ...product,
+        status: ProductStatus.PUBLISHED,
+        images: [{ id: 'img-1' }],
+      });
+      imageRepo.findOne.mockResolvedValue({ id: 'img-1', publicId: null });
+
+      await expect(service.removeImage('product-1', 'img-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(imageRepo.remove).not.toHaveBeenCalled();
     });
 
     it('removeImage rejects an image of another product', async () => {

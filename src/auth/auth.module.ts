@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from '@/users/users.module';
 import { AdminAuthController } from './admin-auth.controller';
 import { AuthController } from './auth.controller';
+import { AuthPolicy } from './policies/auth.policy';
 import { AuthService } from './auth.service';
 import { Identity } from './entities/identity.entity';
 // import { GoogleStrategy } from './strategies/google.strategy';
@@ -36,6 +37,7 @@ import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
   ],
   providers: [
     AuthService,
+    AuthPolicy,
     LocalStrategy,
     JwtStrategy,
     JwtRefreshStrategy,

@@ -11,6 +11,7 @@ import {
 } from './admin-products.controller';
 import { ProductsService } from './products.service';
 import { MediaModule } from '@/media/media.module';
+import { ProductPolicy } from './policies/product.policy';
 
 @Module({
   imports: [
@@ -23,7 +24,7 @@ import { MediaModule } from '@/media/media.module';
     AdminProductsController,
     AdminTagsController,
   ],
-  providers: [ProductsService],
+  providers: [ProductsService, ProductPolicy],
   exports: [TypeOrmModule],
 })
 export class ProductsModule {}

@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -26,6 +25,7 @@ import { PaymentStatus } from './enums/payment-status.enum';
 import { RefundStatus } from './enums/refund-status.enum';
 import { PaymentGatewayRegistry } from './gateways/payment-gateway.registry';
 import { fromStripeAmount } from './gateways/stripe/stripe-currency.util';
+import { PaymentPolicy } from './policies/payment.policy';
 
 type GatewayEventOutcome = 'processed' | 'already_terminal' | 'not_found';
 
@@ -49,16 +49,6 @@ const COMMITTED_REFUND_STATUSES = [
   RefundStatus.SUCCEEDED,
 ];
 
-// A payment in any of these statuses has already been settled one way or
-// another (paid in full, or resolved via the refund flow) and must not be
-// mutated by updateStatus/completeFromGatewayEvent/failFromGatewayEvent —
-// kept as one shared list so the three call sites can't drift out of sync.
-const TERMINAL_PAYMENT_STATUSES = [
-  PaymentStatus.COMPLETED,
-  PaymentStatus.PARTIALLY_REFUNDED,
-  PaymentStatus.REFUNDED,
-];
-
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -71,6 +61,7 @@ export class PaymentsService {
     private readonly dataSource: DataSource,
     private readonly ordersService: OrdersService,
     private readonly gatewayRegistry: PaymentGatewayRegistry,
+    private readonly paymentPolicy: PaymentPolicy,
   ) {}
 
   async create(userId: string, dto: CreatePaymentDto): Promise<Payment> {
@@ -88,17 +79,8 @@ export class PaymentsService {
           lock: { mode: 'pessimistic_write' },
         });
         if (!order) throw new NotFoundException('Order not found');
-        if (order.user_id !== userId) throw new ForbiddenException();
-
-        if (
-          order.status === OrderStatus.CANCELLED ||
-          order.status === OrderStatus.REFUNDED ||
-          order.status === OrderStatus.PARTIALLY_REFUNDED
-        ) {
-          throw new BadRequestException(
-            `Cannot pay for an order with status "${order.status}"`,
-          );
-        }
+        this.paymentPolicy.assertOrderOwnedBy(order, userId);
+        this.paymentPolicy.assertOrderPayable(order);
 
         // PARTIALLY_REFUNDED is included alongside PENDING/COMPLETED: it's
         // still the order's "active" payment (money was collected, only
@@ -203,8 +185,7 @@ export class PaymentsService {
     });
 
     if (!payment) throw new NotFoundException('Payment not found');
-    if (userId && payment.order.user_id !== userId)
-      throw new ForbiddenException();
+    if (userId) this.paymentPolicy.assertOrderOwnedBy(payment.order, userId);
 
     return payment;
   }
@@ -218,23 +199,7 @@ export class PaymentsService {
     dto: UpdatePaymentStatusDto,
     actorId?: string,
   ): Promise<Payment> {
-    // partially_refunded/refunded are system-derived statuses: they're only
-    // ever set by createRefund/refundFromGatewayEvent alongside an actual
-    // Refund record, the corresponding gateway call, and the matching order
-    // sync. Allowing an admin to set either directly here would let a payment
-    // claim to be (partially) refunded with no money actually returned and no
-    // Refund row behind it — and since resolveRefundableItems only allows
-    // refunding a payment whose status is COMPLETED or PARTIALLY_REFUNDED,
-    // setting REFUNDED here would also permanently block the real refund flow
-    // from ever fixing it.
-    if (
-      dto.status === PaymentStatus.PARTIALLY_REFUNDED ||
-      dto.status === PaymentStatus.REFUNDED
-    ) {
-      throw new BadRequestException(
-        `Status "${dto.status}" is set automatically by the refund flow and cannot be assigned directly`,
-      );
-    }
+    this.paymentPolicy.assertStatusAssignable(dto.status);
 
     // Locks the payment row so this read-check-write can't interleave with
     // a concurrent webhook event (completeFromGatewayEvent/
@@ -245,11 +210,7 @@ export class PaymentsService {
       const payment = await this.lockPayment(manager, id);
       if (!payment) throw new NotFoundException('Payment not found');
 
-      if (TERMINAL_PAYMENT_STATUSES.includes(payment.status)) {
-        throw new BadRequestException(
-          `Cannot update a payment with status "${payment.status}"`,
-        );
-      }
+      this.paymentPolicy.assertNotTerminal(payment);
 
       payment.status = dto.status;
 
@@ -296,7 +257,7 @@ export class PaymentsService {
     return this.commitAndNotify<GatewayEventOutcome>(async (manager) => {
       const payment = await this.lockPayment(manager, paymentId);
       if (!payment) return { result: 'not_found', orderNotify: null };
-      if (TERMINAL_PAYMENT_STATUSES.includes(payment.status)) {
+      if (this.paymentPolicy.isTerminal(payment.status)) {
         return { result: 'already_terminal', orderNotify: null };
       }
 
@@ -328,7 +289,7 @@ export class PaymentsService {
     return this.dataSource.transaction(async (manager) => {
       const payment = await this.lockPayment(manager, paymentId);
       if (!payment) return 'not_found';
-      if (TERMINAL_PAYMENT_STATUSES.includes(payment.status)) {
+      if (this.paymentPolicy.isTerminal(payment.status)) {
         return 'already_terminal';
       }
 
@@ -360,18 +321,14 @@ export class PaymentsService {
         return { result: 'not_found', orderNotify: null };
       }
       // Unlike the sibling gateway-event handlers, this one deliberately
-      // doesn't block on the full TERMINAL_PAYMENT_STATUSES set — COMPLETED
+      // doesn't block on the full terminal-status set — COMPLETED
       // and PARTIALLY_REFUNDED are exactly the states a further dashboard
       // refund is expected to move on from. But it must still reject a
       // payment that was never actually marked paid (PENDING/FAILED): an
       // out-of-order or lost checkout.session.completed event could
       // otherwise let this handler mark a never-paid payment REFUNDED
       // directly, with paidAt never set and no completed charge behind it.
-      if (
-        payment.status === PaymentStatus.REFUNDED ||
-        (payment.status !== PaymentStatus.COMPLETED &&
-          payment.status !== PaymentStatus.PARTIALLY_REFUNDED)
-      ) {
+      if (!this.paymentPolicy.isRefundable(payment.status)) {
         return { result: 'already_terminal', orderNotify: null };
       }
 
@@ -475,28 +432,13 @@ export class PaymentsService {
     });
     if (!payment) throw new NotFoundException('Payment not found');
 
-    if (
-      payment.status !== PaymentStatus.COMPLETED &&
-      payment.status !== PaymentStatus.PARTIALLY_REFUNDED
-    ) {
-      throw new BadRequestException(
-        `Cannot refund a payment with status "${payment.status}"`,
-      );
-    }
+    this.paymentPolicy.assertRefundable(payment);
 
     const orderItemsById = new Map<string, OrderItem>(
       payment.order.items.map((item) => [item.id, item]),
     );
 
-    const requestedItemIds = new Set<string>();
-    for (const reqItem of items) {
-      if (requestedItemIds.has(reqItem.order_item_id)) {
-        throw new BadRequestException(
-          `Order item ${reqItem.order_item_id} is listed more than once`,
-        );
-      }
-      requestedItemIds.add(reqItem.order_item_id);
-    }
+    this.paymentPolicy.assertNoDuplicateRefundItems(items);
 
     const committedQtyByItem = await this.getRefundQuantitiesByItem(
       manager,
@@ -537,11 +479,11 @@ export class PaymentsService {
       const committedQty = committedQtyByItem.get(orderItem.id) ?? 0;
       const reservedQty = extraReservedQtyByItem?.get(orderItem.id) ?? 0;
       const refundableQty = orderItem.quantity - committedQty - reservedQty;
-      if (reqItem.quantity > refundableQty) {
-        throw new BadRequestException(
-          `Cannot refund ${reqItem.quantity} of "${orderItem.productName}" — only ${refundableQty} left refundable`,
-        );
-      }
+      this.paymentPolicy.assertRefundQuantityAvailable(
+        orderItem.productName,
+        reqItem.quantity,
+        refundableQty,
+      );
 
       const itemAmount = new Big(Number(orderItem.unitPrice))
         .times(reqItem.quantity)
@@ -561,11 +503,11 @@ export class PaymentsService {
       paymentId,
       COMMITTED_REFUND_STATUSES,
     );
-    if (new Big(committedTotal).plus(amount).gt(Number(payment.amount))) {
-      throw new BadRequestException(
-        'Refund amount exceeds the remaining refundable balance',
-      );
-    }
+    this.paymentPolicy.assertWithinRefundableBalance(
+      committedTotal,
+      amount,
+      Number(payment.amount),
+    );
 
     return { payment, itemsToCreate, amount: amount.toNumber() };
   }

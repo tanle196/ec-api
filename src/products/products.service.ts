@@ -22,6 +22,7 @@ import { ProductListItemDto } from './dto/product-response.dto';
 import { ProductStatus } from './enums/product-status.enum';
 import { MediaService } from '@/media/media.service';
 import { generateUniqueSlug } from '@/common/utils/slug.util';
+import { ProductPolicy } from './policies/product.policy';
 
 @Injectable()
 export class ProductsService {
@@ -37,6 +38,7 @@ export class ProductsService {
     @InjectRepository(Tag)
     private readonly tagRepo: Repository<Tag>,
     private readonly mediaService: MediaService,
+    private readonly productPolicy: ProductPolicy,
   ) {}
 
   // ── Products ───────────────────────────────────────────────
@@ -55,6 +57,10 @@ export class ProductsService {
     }
     await this.assertSkuUnique(dto.sku);
 
+    const status = dto.status ?? ProductStatus.DRAFT;
+    if (status === ProductStatus.PUBLISHED)
+      this.productPolicy.assertCanPublish(dto);
+
     if (dto.variants?.length) {
       for (const v of dto.variants) await this.assertVariantSkuUnique(v.sku);
     }
@@ -69,7 +75,7 @@ export class ProductsService {
       description: dto.description ?? null,
       basePrice: dto.basePrice,
       sku: dto.sku,
-      status: dto.status ?? ProductStatus.DRAFT,
+      status,
       isFeatured: dto.isFeatured ?? false,
       tags,
     });
@@ -117,7 +123,9 @@ export class ProductsService {
     if (category_id)
       qb.andWhere('p.category_id = :category_id', { category_id });
     if (publishedOnly) {
-      qb.andWhere('p.status = :status', { status: ProductStatus.PUBLISHED });
+      qb.andWhere('p.status = :status', {
+        status: this.productPolicy.publicStatus,
+      });
     } else if (status) {
       qb.andWhere('p.status = :status', { status });
     }
@@ -138,7 +146,9 @@ export class ProductsService {
     { publishedOnly = false }: { publishedOnly?: boolean } = {},
   ): Promise<Product> {
     const product = await this.productRepo.findOne({
-      where: publishedOnly ? { id, status: ProductStatus.PUBLISHED } : { id },
+      where: publishedOnly
+        ? { id, status: this.productPolicy.publicStatus }
+        : { id },
       relations: ['images', 'variants', 'tags', 'category'],
     });
     if (!product) throw new NotFoundException('Product not found');
@@ -151,7 +161,7 @@ export class ProductsService {
   ): Promise<Product> {
     const product = await this.productRepo.findOne({
       where: publishedOnly
-        ? { slug, status: ProductStatus.PUBLISHED }
+        ? { slug, status: this.productPolicy.publicStatus }
         : { slug },
       relations: ['images', 'variants', 'tags', 'category'],
     });
@@ -184,14 +194,23 @@ export class ProductsService {
       product.description = dto.description ?? null;
     if (dto.basePrice !== undefined) product.basePrice = dto.basePrice;
     if (dto.sku !== undefined) product.sku = dto.sku;
-    if (dto.status !== undefined) product.status = dto.status;
+    if (dto.status !== undefined) {
+      this.productPolicy.assertCanTransition(product.status, dto.status);
+      product.status = dto.status;
+    }
     if (dto.isFeatured !== undefined) product.isFeatured = dto.isFeatured;
+
+    // Re-checked on every update of a published product, not just the
+    // transition, so e.g. dropping the price to 0 can't slip through.
+    if (product.status === ProductStatus.PUBLISHED)
+      this.productPolicy.assertCanPublish(product);
 
     return this.productRepo.save(product);
   }
 
   async remove(id: string): Promise<{ success: boolean }> {
     const product = await this.findOne(id);
+    this.productPolicy.assertCanDelete(product.status);
     await this.productRepo.remove(product);
     return { success: true };
   }
@@ -261,6 +280,12 @@ export class ProductsService {
       where: { id: imageId, product_id: productId },
     });
     if (!image) throw new NotFoundException('Image not found');
+
+    const product = await this.findOne(productId);
+    this.productPolicy.assertCanRemoveImage(
+      product.status,
+      product.images?.length ?? 0,
+    );
 
     if (image.publicId) {
       try {

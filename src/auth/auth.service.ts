@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -20,8 +19,7 @@ import { TypedConfigService } from '@/config/TypedConfigService';
 import { MailService } from '@/mail/mail.service';
 import { UsersService } from '@/users/users.service';
 import { generateUserCode } from '@/users/utils/user-code.util';
-
-const ADMIN_ROLES = ['super-admin', 'admin'];
+import { AuthPolicy } from './policies/auth.policy';
 
 @Injectable()
 export class AuthService {
@@ -35,6 +33,7 @@ export class AuthService {
     private readonly dataSource: DataSource,
     @InjectRepository(Identity)
     private readonly identityRepository: Repository<Identity>,
+    private readonly authPolicy: AuthPolicy,
   ) {}
 
   async hashedPassword(password: string): Promise<string> {
@@ -100,21 +99,9 @@ export class AuthService {
     id: string;
   }): Promise<{ accessToken: string; refreshToken: string }> {
     const userProfile = await this.userService.getUserProfile(id);
-    if (!userProfile?.roles.some((role) => ADMIN_ROLES.includes(role))) {
-      throw new ForbiddenException(
-        'Tài khoản không có quyền truy cập trang quản trị',
-      );
-    }
+    this.authPolicy.assertAdminRole(userProfile?.roles ?? []);
 
     return this.generateTokens({ id });
-  }
-
-  assertAdminRole(roles: string[]): void {
-    if (!roles.some((role) => ADMIN_ROLES.includes(role))) {
-      throw new ForbiddenException(
-        'Tài khoản không có quyền truy cập trang quản trị',
-      );
-    }
   }
 
   async rotateRefreshToken(
@@ -161,9 +148,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    if (!identity.isActive) {
-      throw new UnauthorizedException('Account is not activated');
-    }
+    this.authPolicy.assertCanLogin(identity);
 
     if (!identity.passwordHash) {
       throw new UnauthorizedException('Invalid credentials');
@@ -204,9 +189,7 @@ export class AuthService {
       .getOne();
 
     if (identity) {
-      if (!identity.isActive) {
-        throw new UnauthorizedException('Account is not activated');
-      }
+      this.authPolicy.assertCanLogin(identity);
       return {
         id: identity.user.id,
         email: identity.user.email,
@@ -369,16 +352,7 @@ export class AuthService {
       throw new BadRequestException('Invalid token');
     }
 
-    if (identity.isActive) {
-      throw new BadRequestException('Account is already active');
-    }
-
-    if (
-      identity.verificationTokenExpires &&
-      identity.verificationTokenExpires < new Date()
-    ) {
-      throw new BadRequestException('Token has expired');
-    }
+    this.authPolicy.assertCanActivate(identity);
 
     identity.verificationToken = null;
     identity.verificationTokenExpires = null;
@@ -406,11 +380,7 @@ export class AuthService {
       (i) => i.provider === AuthProvider.LOCAL,
     );
 
-    if (!identity) {
-      throw new BadRequestException(
-        'This account is registered using Google/Facebook. Please log in with that provider.',
-      );
-    }
+    this.authPolicy.assertHasLocalIdentity(identity);
 
     identity.resetToken = tokenHash;
     identity.resetTokenExpires = expires;
@@ -427,17 +397,10 @@ export class AuthService {
       where: { resetToken: tokenHash },
     });
 
-    if (
-      !identity ||
-      !identity.resetTokenExpires ||
-      identity.resetTokenExpires < new Date()
-    ) {
+    if (!identity) {
       throw new BadRequestException('Invalid or expired token');
     }
-
-    if (!identity.isActive) {
-      throw new BadRequestException('Account is not activated');
-    }
+    this.authPolicy.assertCanResetPassword(identity);
 
     identity.passwordHash = await this.hashedPassword(newPassword);
     identity.resetToken = null;

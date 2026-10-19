@@ -1,3 +1,4 @@
+import { AuthPolicy } from './policies/auth.policy';
 import {
   BadRequestException,
   ForbiddenException,
@@ -99,6 +100,7 @@ describe('AuthService', () => {
       userService as never,
       dataSource as never,
       identityRepository as never,
+      new AuthPolicy(),
     );
 
     return {
@@ -183,7 +185,7 @@ describe('AuthService', () => {
     });
   });
 
-  describe('adminLogin / assertAdminRole', () => {
+  describe('adminLogin', () => {
     it.each(['admin', 'super-admin'])('allows %s', async (role) => {
       const { service, userService } = buildService();
       userService.getUserProfile.mockResolvedValue({ roles: [role] });
@@ -211,16 +213,6 @@ describe('AuthService', () => {
       await expect(service.adminLogin({ id: 'user-1' })).rejects.toThrow(
         ForbiddenException,
       );
-    });
-
-    it('assertAdminRole throws for non-admin roles only', () => {
-      const { service } = buildService();
-
-      expect(() => service.assertAdminRole(['admin'])).not.toThrow();
-      expect(() => service.assertAdminRole(['customer'])).toThrow(
-        ForbiddenException,
-      );
-      expect(() => service.assertAdminRole([])).toThrow(ForbiddenException);
     });
   });
 

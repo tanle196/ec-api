@@ -16,12 +16,14 @@ import { ValidateDiscountDto } from './dto/validate-discount.dto';
 import { ValidateDiscountResponseDto } from './dto/discount-response.dto';
 import { Discount } from './entities/discount.entity';
 import { DiscountType } from './enums/discount-type.enum';
+import { DiscountPolicy } from './policies/discount.policy';
 
 @Injectable()
 export class DiscountsService {
   constructor(
     @InjectRepository(Discount)
     private readonly discountRepo: Repository<Discount>,
+    private readonly discountPolicy: DiscountPolicy,
   ) {}
 
   async create(dto: CreateDiscountDto): Promise<Discount> {
@@ -30,7 +32,7 @@ export class DiscountsService {
     });
     if (existing) throw new ConflictException('Discount code already exists');
 
-    this.assertValidValue(dto.type, dto.value);
+    this.discountPolicy.assertValidValue(dto.type, dto.value);
 
     const discount = this.discountRepo.create({
       ...dto,
@@ -79,7 +81,7 @@ export class DiscountsService {
 
     // Checked against the merged result so changing only `type` (or only
     // `value`) can't produce e.g. a 500% percent discount.
-    this.assertValidValue(
+    this.discountPolicy.assertValidValue(
       dto.type ?? discount.type,
       dto.value ?? Number(discount.value),
     );
@@ -118,30 +120,7 @@ export class DiscountsService {
     });
 
     if (!discount) throw new NotFoundException('Discount code not found');
-    if (!discount.isActive)
-      throw new BadRequestException('Discount code is inactive');
-
-    const now = new Date();
-    if (discount.startsAt && now < discount.startsAt)
-      throw new BadRequestException('Discount code is not yet valid');
-    if (discount.expiresAt && now > discount.expiresAt)
-      throw new BadRequestException('Discount code has expired');
-
-    if (
-      discount.usageLimit !== null &&
-      discount.usedCount >= discount.usageLimit
-    )
-      throw new BadRequestException(
-        'Discount code has reached its usage limit',
-      );
-
-    if (
-      discount.minOrderValue !== null &&
-      subtotal < Number(discount.minOrderValue)
-    )
-      throw new BadRequestException(
-        `Minimum order value for this code is ${discount.minOrderValue}`,
-      );
+    this.discountPolicy.assertUsable(discount, subtotal);
 
     return discount;
   }
@@ -154,14 +133,6 @@ export class DiscountsService {
     // Never discount more than the subtotal, so an order total can't go
     // negative even if a percent value above 100 slipped into the DB.
     return Math.min(amount, subtotal);
-  }
-
-  private assertValidValue(type: DiscountType, value: number): void {
-    if (type === DiscountType.PERCENT && value > 100) {
-      throw new BadRequestException(
-        'Percent discount value must be between 0 and 100',
-      );
-    }
   }
 
   /**

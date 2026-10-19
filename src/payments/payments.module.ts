@@ -23,6 +23,8 @@ import { AdminRefundRequestsController } from './admin-refund-requests.controlle
 import { PaymentWebhooksService } from './payment-webhooks.service';
 import { PaymentsService } from './payments.service';
 import { RefundRequestsService } from './refund-requests.service';
+import { PaymentPolicy } from './policies/payment.policy';
+import { RefundRequestPolicy } from './policies/refund-request.policy';
 
 @Module({
   imports: [
@@ -50,6 +52,8 @@ import { RefundRequestsService } from './refund-requests.service';
     PaymentsService,
     PaymentWebhooksService,
     RefundRequestsService,
+    PaymentPolicy,
+    RefundRequestPolicy,
     PaymentGatewayRegistry,
     StripeClientProvider,
     StripeGatewayProvider,

@@ -1,3 +1,4 @@
+import { OrderPolicy } from './policies/order.policy';
 import {
   BadRequestException,
   ForbiddenException,
@@ -129,6 +130,7 @@ describe('OrdersService', () => {
       cartsService as never,
       mailService as never,
       usersService as never,
+      new OrderPolicy(),
     );
     jest.spyOn(service['logger'], 'warn').mockImplementation(() => undefined);
     jest.spyOn(service['logger'], 'error').mockImplementation(() => undefined);

@@ -1,3 +1,4 @@
+import { CartPolicy } from './policies/cart.policy';
 import {
   NotFoundException,
   UnprocessableEntityException,
@@ -36,6 +37,7 @@ describe('CartsService', () => {
       itemRepo as never,
       variantRepo as never,
       dataSource as never,
+      new CartPolicy(),
     );
     return { service, cartRepo, itemRepo, variantRepo, manager, dataSource };
   };

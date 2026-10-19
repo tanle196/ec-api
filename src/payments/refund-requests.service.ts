@@ -1,10 +1,4 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
@@ -20,8 +14,8 @@ import { Payment } from './entities/payment.entity';
 import { Refund } from './entities/refund.entity';
 import { RefundRequest } from './entities/refund-request.entity';
 import { RefundRequestStatus } from './enums/refund-request-status.enum';
-import { PaymentStatus } from './enums/payment-status.enum';
 import { PaymentsService } from './payments.service';
+import { RefundRequestPolicy } from './policies/refund-request.policy';
 
 @Injectable()
 export class RefundRequestsService {
@@ -34,6 +28,7 @@ export class RefundRequestsService {
     private readonly paymentsService: PaymentsService,
     private readonly usersService: UsersService,
     private readonly mailService: MailService,
+    private readonly refundRequestPolicy: RefundRequestPolicy,
   ) {}
 
   async create(
@@ -41,16 +36,7 @@ export class RefundRequestsService {
     dto: CreateRefundRequestDto,
   ): Promise<RefundRequest> {
     const payment = await this.paymentsService.findOne(dto.payment_id);
-    if (payment.order.user_id !== userId) throw new ForbiddenException();
-
-    if (
-      payment.status !== PaymentStatus.COMPLETED &&
-      payment.status !== PaymentStatus.PARTIALLY_REFUNDED
-    ) {
-      throw new BadRequestException(
-        `Cannot request a refund for a payment with status "${payment.status}"`,
-      );
-    }
+    this.refundRequestPolicy.assertCanRequest(payment, userId);
 
     // Locks the payment row so the "how much is already pending/refunded"
     // check and the new RefundRequest insert are atomic against concurrent
@@ -106,7 +92,7 @@ export class RefundRequestsService {
 
   async findMineOne(userId: string, id: string): Promise<RefundRequest> {
     const refundRequest = await this.findOrThrow(id);
-    if (refundRequest.requested_by !== userId) throw new ForbiddenException();
+    this.refundRequestPolicy.assertRequestedBy(refundRequest, userId);
     return refundRequest;
   }
 
@@ -138,11 +124,7 @@ export class RefundRequestsService {
     const refundRequest = await this.dataSource.transaction(async (manager) => {
       const rr = await this.lockRefundRequest(manager, id);
       if (!rr) throw new NotFoundException('Refund request not found');
-      if (rr.status !== RefundRequestStatus.PENDING) {
-        throw new BadRequestException(
-          `Cannot approve a refund request with status "${rr.status}"`,
-        );
-      }
+      this.refundRequestPolicy.assertReviewable(rr, 'approve');
 
       rr.status = RefundRequestStatus.APPROVED;
       rr.reviewedBy = adminId;
@@ -214,11 +196,7 @@ export class RefundRequestsService {
     const refundRequest = await this.dataSource.transaction(async (manager) => {
       const rr = await this.lockRefundRequest(manager, id);
       if (!rr) throw new NotFoundException('Refund request not found');
-      if (rr.status !== RefundRequestStatus.PENDING) {
-        throw new BadRequestException(
-          `Cannot reject a refund request with status "${rr.status}"`,
-        );
-      }
+      this.refundRequestPolicy.assertReviewable(rr, 'reject');
 
       rr.status = RefundRequestStatus.REJECTED;
       rr.reviewedBy = adminId;

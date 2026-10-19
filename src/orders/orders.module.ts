@@ -18,6 +18,7 @@ import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrdersController } from './orders.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 import { OrdersService } from './orders.service';
+import { OrderPolicy } from './policies/order.policy';
 
 @Module({
   imports: [
@@ -36,7 +37,7 @@ import { OrdersService } from './orders.service';
     UsersModule,
   ],
   controllers: [OrdersController, AdminOrdersController],
-  providers: [OrdersService],
+  providers: [OrdersService, OrderPolicy],
   exports: [OrdersService],
 })
 export class OrdersModule {}

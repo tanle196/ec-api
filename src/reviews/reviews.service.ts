@@ -1,6 +1,5 @@
 import {
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -14,6 +13,7 @@ import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { Product } from '@/products/entities/product.entity';
 import { Order } from '@/orders/entities/order.entity';
 import { OrderStatus } from '@/orders/enums/order-status.enum';
+import { ReviewPolicy } from './policies/review.policy';
 
 @Injectable()
 export class ReviewsService {
@@ -24,6 +24,7 @@ export class ReviewsService {
     private readonly productRepo: Repository<Product>,
     @InjectRepository(Order)
     private readonly orderRepo: Repository<Order>,
+    private readonly reviewPolicy: ReviewPolicy,
   ) {}
 
   async create(userId: string, dto: CreateReviewDto): Promise<Review> {
@@ -118,9 +119,7 @@ export class ReviewsService {
   ): Promise<Review> {
     const review = await this.findOne(id);
 
-    if (!isAdmin && review.user_id !== userId) {
-      throw new ForbiddenException('You can only edit your own reviews');
-    }
+    this.reviewPolicy.assertCanEdit(review, userId, isAdmin);
 
     if (dto.rating !== undefined) review.rating = dto.rating;
     if (dto.title !== undefined) review.title = dto.title ?? null;
@@ -146,9 +145,7 @@ export class ReviewsService {
   ): Promise<{ success: boolean }> {
     const review = await this.findOne(id);
 
-    if (!isAdmin && review.user_id !== userId) {
-      throw new ForbiddenException('You can only delete your own reviews');
-    }
+    this.reviewPolicy.assertCanDelete(review, userId, isAdmin);
 
     await this.reviewRepo.remove(review);
     return { success: true };

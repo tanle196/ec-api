@@ -12,7 +12,6 @@ describe('AdminAuthController', () => {
   const buildController = () => {
     const authService = {
       adminLogin: jest.fn().mockResolvedValue(tokens),
-      assertAdminRole: jest.fn(),
       activeAccount: jest.fn().mockResolvedValue({ id: 'user-1' }),
       rotateRefreshToken: jest.fn().mockResolvedValue(tokens),
       forgotPassword: jest.fn().mockResolvedValue(undefined),
@@ -21,13 +20,16 @@ describe('AdminAuthController', () => {
     const usersService = {
       getUserProfile: jest.fn().mockResolvedValue({ id: 'user-1' }),
     };
+    const authPolicy = { assertAdminRole: jest.fn() };
     return {
       controller: new AdminAuthController(
         authService as never,
         usersService as never,
+        authPolicy as never,
       ),
       authService,
       usersService,
+      authPolicy,
     };
   };
 
@@ -40,18 +42,18 @@ describe('AdminAuthController', () => {
 
   describe('me', () => {
     it('returns the profile for an admin', async () => {
-      const { controller, authService, usersService } = buildController();
+      const { controller, authPolicy, usersService } = buildController();
 
       await expect(controller.me(admin as never)).resolves.toEqual({
         id: 'user-1',
       });
-      expect(authService.assertAdminRole).toHaveBeenCalledWith(['admin']);
+      expect(authPolicy.assertAdminRole).toHaveBeenCalledWith(['admin']);
       expect(usersService.getUserProfile).toHaveBeenCalledWith('user-1');
     });
 
     it('rejects a non-admin before loading the profile', async () => {
-      const { controller, authService, usersService } = buildController();
-      authService.assertAdminRole.mockImplementation(() => {
+      const { controller, authPolicy, usersService } = buildController();
+      authPolicy.assertAdminRole.mockImplementation(() => {
         throw new ForbiddenException();
       });
 
@@ -73,10 +75,10 @@ describe('AdminAuthController', () => {
 
   describe('refresh', () => {
     it('checks the admin role then rotates', async () => {
-      const { controller, authService } = buildController();
+      const { controller, authService, authPolicy } = buildController();
 
       await expect(controller.refresh(admin as never)).resolves.toBe(tokens);
-      expect(authService.assertAdminRole).toHaveBeenCalledWith(['admin']);
+      expect(authPolicy.assertAdminRole).toHaveBeenCalledWith(['admin']);
       expect(authService.rotateRefreshToken).toHaveBeenCalledWith(
         'user-1',
         'jti',
@@ -92,8 +94,8 @@ describe('AdminAuthController', () => {
     });
 
     it('does not rotate for a non-admin', async () => {
-      const { controller, authService } = buildController();
-      authService.assertAdminRole.mockImplementation(() => {
+      const { controller, authService, authPolicy } = buildController();
+      authPolicy.assertAdminRole.mockImplementation(() => {
         throw new ForbiddenException();
       });
 

@@ -1,3 +1,4 @@
+import { ReviewPolicy } from './policies/review.policy';
 import {
   ConflictException,
   ForbiddenException,
@@ -50,6 +51,7 @@ describe('ReviewsService', () => {
       reviewRepo as never,
       productRepo as never,
       orderRepo as never,
+      new ReviewPolicy(),
     );
     return { service, reviewRepo, reviewQb, productRepo, orderQb };
   };

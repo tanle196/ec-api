@@ -1,3 +1,4 @@
+import { CategoryPolicy } from './policies/category.policy';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
 
@@ -31,7 +32,11 @@ describe('CategoriesService', () => {
         .fn()
         .mockResolvedValue({ url: 'https://cdn/new.png', publicId: 'cat/new' }),
     };
-    const service = new CategoriesService(repo as never, mediaService as never);
+    const service = new CategoriesService(
+      repo as never,
+      mediaService as never,
+      new CategoryPolicy(),
+    );
     jest.spyOn(service['logger'], 'warn').mockImplementation(() => undefined);
     return { service, repo, mediaService };
   };

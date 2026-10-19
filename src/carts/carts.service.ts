@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ProductVariant } from '@/products/entities/product-variant.entity';
@@ -10,6 +6,7 @@ import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 import { Cart } from './entities/cart.entity';
 import { CartItem } from './entities/cart-item.entity';
+import { CartPolicy } from './policies/cart.policy';
 
 @Injectable()
 export class CartsService {
@@ -21,6 +18,7 @@ export class CartsService {
     @InjectRepository(ProductVariant)
     private readonly variantRepo: Repository<ProductVariant>,
     private readonly dataSource: DataSource,
+    private readonly cartPolicy: CartPolicy,
   ) {}
 
   async getCart(userId: string): Promise<Cart> {
@@ -44,16 +42,10 @@ export class CartsService {
     });
 
     if (!variant) throw new NotFoundException('Variant not found');
-    if (!variant.isActive)
-      throw new UnprocessableEntityException('Variant is inactive');
+    this.cartPolicy.assertVariantPurchasable(variant);
 
     const quantity = dto.quantity ?? 1;
-
-    if (variant.stock < quantity) {
-      throw new UnprocessableEntityException(
-        `Insufficient stock: available ${variant.stock}, requested ${quantity}`,
-      );
-    }
+    this.cartPolicy.assertStockAvailable(variant.stock, quantity);
 
     const cart = await this.getCart(userId);
 
@@ -91,11 +83,7 @@ export class CartsService {
       // Re-validate against the merged total inside the same transaction, so
       // an insufficient-stock error rolls back the upsert above instead of
       // leaving a partially-applied quantity change.
-      if (freshVariant.stock < newQty) {
-        throw new UnprocessableEntityException(
-          `Insufficient stock: available ${freshVariant.stock}, requested ${newQty}`,
-        );
-      }
+      this.cartPolicy.assertStockAvailable(freshVariant.stock, newQty);
     });
 
     return this.getCart(userId);
@@ -117,11 +105,8 @@ export class CartsService {
       where: { id: item.variant_id },
     });
 
-    if (variant && variant.stock < dto.quantity) {
-      throw new UnprocessableEntityException(
-        `Insufficient stock: available ${variant.stock}, requested ${dto.quantity}`,
-      );
-    }
+    if (variant)
+      this.cartPolicy.assertStockAvailable(variant.stock, dto.quantity);
 
     item.quantity = dto.quantity;
     await this.itemRepo.save(item);

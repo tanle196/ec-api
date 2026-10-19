@@ -1,3 +1,5 @@
+import { PaymentPolicy } from './policies/payment.policy';
+import { RefundRequestPolicy } from './policies/refund-request.policy';
 import { RefundRequestsService } from './refund-requests.service';
 import { RefundRequestStatus } from './enums/refund-request-status.enum';
 
@@ -42,6 +44,7 @@ describe('RefundRequestsService', () => {
       paymentsService as never,
       usersService as never,
       mailService as never,
+      new RefundRequestPolicy(new PaymentPolicy()),
     );
 
     return {
