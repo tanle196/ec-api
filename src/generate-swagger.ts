@@ -2,8 +2,9 @@
 import 'tsconfig-paths/register';
 
 import { NestFactory } from '@nestjs/core';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { buildSwaggerConfig } from './common/swagger/swagger.config';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -18,19 +19,7 @@ async function generateSwagger() {
     console.log('✅ App created');
 
     console.log('2️⃣ Building Swagger config...');
-    const config = new DocumentBuilder()
-      .setTitle('My API')
-      .setDescription('API documentation')
-      .setVersion('1.0')
-      .addBearerAuth(
-        {
-          type: 'http',
-          scheme: 'bearer',
-          bearerFormat: 'JWT',
-        },
-        'JWT-auth',
-      )
-      .build();
+    const config = buildSwaggerConfig();
     console.log('✅ Config built');
 
     console.log('3️⃣ Creating Swagger document...');
