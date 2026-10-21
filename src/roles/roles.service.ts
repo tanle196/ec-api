@@ -13,6 +13,7 @@ import { UpdateRoleDto } from './dto/update-role.dto';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { RoleResponseDto } from './dto/role-response.dto';
 import { RoleListQueryDto } from './dto/role-list-query.dto';
+import { RoleMapper } from './mapper/role.mapper';
 
 @Injectable()
 export class RolesService {
@@ -57,14 +58,7 @@ export class RolesService {
     });
 
     return {
-      data: roles.map((r) => ({
-        id: r.id,
-        name: r.name,
-        description: r.description,
-        permissions: r.permissions,
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt,
-      })),
+      data: RoleMapper.toResponseList(roles),
       total,
       page,
       limit,

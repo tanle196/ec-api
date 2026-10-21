@@ -2,7 +2,26 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { WishlistsService } from './wishlists.service';
 
 describe('WishlistsService', () => {
-  const item = { id: 'w-1', user_id: 'user-1', product_id: 'product-1' };
+  const createdAt = new Date('2026-01-01');
+  const product = {
+    id: 'product-1',
+    name: 'Áo thun',
+    slug: 'ao-thun',
+    basePrice: 100000,
+    sku: 'AT-1',
+    status: 'published',
+    isFeatured: false,
+    description: null,
+    category_id: 'cat-1',
+    variants: [{ id: 'v-1', stock: 3 }],
+  };
+  const item = {
+    id: 'w-1',
+    user_id: 'user-1',
+    product_id: 'product-1',
+    product,
+    createdAt,
+  };
 
   const buildService = () => {
     const wishlistRepo = {
@@ -27,7 +46,23 @@ describe('WishlistsService', () => {
     const { service, wishlistRepo } = buildService();
 
     await expect(service.getWishlist('user-1')).resolves.toEqual({
-      items: [item],
+      items: [
+        {
+          id: 'w-1',
+          product_id: 'product-1',
+          product: {
+            id: 'product-1',
+            name: 'Áo thun',
+            slug: 'ao-thun',
+            basePrice: 100000,
+            sku: 'AT-1',
+            status: 'published',
+            isFeatured: false,
+            description: null,
+          },
+          createdAt,
+        },
+      ],
       total: 1,
     });
     expect(wishlistRepo.find).toHaveBeenCalledWith({

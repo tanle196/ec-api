@@ -6,6 +6,7 @@ import {
   AdminTagsController,
 } from './admin-products.controller';
 import { ProductsController, TagsController } from './products.controller';
+import { ProductMapper } from './mapper/product.mapper';
 
 const permissionsOf = (cls: { prototype: object }, method: string) =>
   Reflect.getMetadata(
@@ -37,16 +38,49 @@ describe('Product controllers', () => {
   const service = Object.fromEntries(
     methods.map((m) => [m, jest.fn().mockResolvedValue(m)]),
   );
+  service.findAll.mockResolvedValue({
+    data: ['findAll'],
+    total: 1,
+    page: 1,
+    limit: 20,
+  });
+
+  // Tag each mapper's output so the tests prove which mapper the controller used.
+  const tagged =
+    (tag: string) =>
+    (value: unknown): never =>
+      ({ [tag]: value }) as never;
+
+  beforeAll(() => {
+    jest.spyOn(ProductMapper, 'toListItem').mockImplementation(tagged('list'));
+    jest.spyOn(ProductMapper, 'toResponse').mockImplementation(tagged('admin'));
+    jest
+      .spyOn(ProductMapper, 'toPublicResponse')
+      .mockImplementation(tagged('public'));
+    jest.spyOn(ProductMapper, 'toImage').mockImplementation(tagged('image'));
+    jest
+      .spyOn(ProductMapper, 'toVariant')
+      .mockImplementation(tagged('variant'));
+    jest.spyOn(ProductMapper, 'toTag').mockImplementation(tagged('tag'));
+    jest.spyOn(ProductMapper, 'toTagList').mockImplementation(tagged('tags'));
+  });
+
+  const page = (item: unknown) => ({
+    data: [item],
+    total: 1,
+    page: 1,
+    limit: 20,
+  });
 
   beforeEach(() => jest.clearAllMocks());
 
   it.each([
-    ['findAll', [{ page: 1 }]],
-    ['findBySlug', ['ao-thun']],
-    ['findOne', ['product-1']],
+    ['findAll', [{ page: 1 }], page({ list: 'findAll' })],
+    ['findBySlug', ['ao-thun'], { public: 'findBySlug' }],
+    ['findOne', ['product-1'], { public: 'findOne' }],
   ] as const)(
     'public ProductsController.%s only exposes published products',
-    async (method, args) => {
+    async (method, args, expected) => {
       const controller = new ProductsController(
         service as never,
       ) as unknown as Record<string, Callable>;
@@ -54,7 +88,7 @@ describe('Product controllers', () => {
       expect(
         Reflect.getMetadata(GUARDS_METADATA, ProductsController),
       ).toBeUndefined();
-      await expect(controller[method](...args)).resolves.toBe(method);
+      await expect(controller[method](...args)).resolves.toEqual(expected);
       expect(service[method]).toHaveBeenCalledWith(...args, {
         publishedOnly: true,
       });
@@ -62,19 +96,22 @@ describe('Product controllers', () => {
   );
 
   it.each([
-    ['findAllTags', []],
-    ['findTagBySlug', ['sale']],
-  ] as const)('public TagsController.%s delegates', async (method, args) => {
-    const controller = new TagsController(
-      service as never,
-    ) as unknown as Record<string, Callable>;
+    ['findAllTags', [], { tags: 'findAllTags' }],
+    ['findTagBySlug', ['sale'], { tag: 'findTagBySlug' }],
+  ] as const)(
+    'public TagsController.%s delegates',
+    async (method, args, expected) => {
+      const controller = new TagsController(
+        service as never,
+      ) as unknown as Record<string, Callable>;
 
-    expect(
-      Reflect.getMetadata(GUARDS_METADATA, TagsController),
-    ).toBeUndefined();
-    await expect(controller[method](...args)).resolves.toBe(method);
-    expect(service[method]).toHaveBeenCalledWith(...args);
-  });
+      expect(
+        Reflect.getMetadata(GUARDS_METADATA, TagsController),
+      ).toBeUndefined();
+      await expect(controller[method](...args)).resolves.toEqual(expected);
+      expect(service[method]).toHaveBeenCalledWith(...args);
+    },
+  );
 
   describe('AdminProductsController', () => {
     const controller = new AdminProductsController(
@@ -88,22 +125,40 @@ describe('Product controllers', () => {
     });
 
     it.each([
-      ['findAll', 'product.read', [{ page: 1 }]],
-      ['findOne', 'product.read', ['p']],
-      ['create', 'product.create', [{ name: 'x' }]],
-      ['update', 'product.update', ['p', { name: 'x' }]],
-      ['remove', 'product.delete', ['p']],
-      ['addImage', 'product.update', ['p', { url: 'u' }]],
-      ['removeImage', 'product.update', ['p', 'img']],
-      ['addVariant', 'product.update', ['p', { sku: 's' }]],
-      ['updateVariant', 'product.update', ['p', 'v', { stock: 1 }]],
-      ['removeVariant', 'product.update', ['p', 'v']],
-    ] as const)('%s requires %s and delegates', async (method, perm, args) => {
-      expect(permissionsOf(AdminProductsController, method)).toEqual([perm]);
-      const callable = controller as Record<string, Callable>;
-      await expect(callable[method](...args)).resolves.toBe(method);
-      expect(service[method]).toHaveBeenCalledWith(...args);
-    });
+      ['findAll', 'product.read', [{ page: 1 }], page({ list: 'findAll' })],
+      ['findOne', 'product.read', ['p'], { admin: 'findOne' }],
+      ['create', 'product.create', [{ name: 'x' }], { admin: 'create' }],
+      ['update', 'product.update', ['p', { name: 'x' }], { admin: 'update' }],
+      ['remove', 'product.delete', ['p'], 'remove'],
+      [
+        'addImage',
+        'product.update',
+        ['p', { url: 'u' }],
+        { image: 'addImage' },
+      ],
+      ['removeImage', 'product.update', ['p', 'img'], 'removeImage'],
+      [
+        'addVariant',
+        'product.update',
+        ['p', { sku: 's' }],
+        { variant: 'addVariant' },
+      ],
+      [
+        'updateVariant',
+        'product.update',
+        ['p', 'v', { stock: 1 }],
+        { variant: 'updateVariant' },
+      ],
+      ['removeVariant', 'product.update', ['p', 'v'], 'removeVariant'],
+    ] as const)(
+      '%s requires %s and delegates',
+      async (method, perm, args, expected) => {
+        expect(permissionsOf(AdminProductsController, method)).toEqual([perm]);
+        const callable = controller as Record<string, Callable>;
+        await expect(callable[method](...args)).resolves.toEqual(expected);
+        expect(service[method]).toHaveBeenCalledWith(...args);
+      },
+    );
 
     it('uploadImage requires product.update and parses multipart fields', async () => {
       const file = { originalname: 'x.png' } as never;
@@ -143,7 +198,9 @@ describe('Product controllers', () => {
       expect(permissionsOf(AdminTagsController, 'createTag')).toEqual([
         'product.create',
       ]);
-      await controller.createTag({ name: 'Sale' });
+      await expect(controller.createTag({ name: 'Sale' })).resolves.toEqual({
+        tag: 'createTag',
+      });
       expect(service.createTag).toHaveBeenCalledWith({ name: 'Sale' });
     });
 

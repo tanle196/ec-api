@@ -31,6 +31,7 @@ import {
 } from './dto/role-response.dto';
 import { AssignPermissionsDto } from './dto/assign-permissions.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
+import { RoleMapper } from './mapper/role.mapper';
 
 @ApiTags('Admin: roles')
 @Controller('admin/roles')
@@ -51,7 +52,7 @@ export class AdminRolesController {
   async createRole(
     @Body() createRoleDto: CreateRoleDto,
   ): Promise<RoleResponseDto> {
-    return this.rolesService.create(createRoleDto);
+    return this.rolesService.create(createRoleDto).then(RoleMapper.toResponse);
   }
 
   @Get()
@@ -68,7 +69,7 @@ export class AdminRolesController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: RoleResponseDto })
   findOne(@Param('id') id: string) {
-    return this.rolesService.findOne(id);
+    return this.rolesService.findOne(id).then(RoleMapper.toResponse);
   }
 
   @Patch(':id')
@@ -77,7 +78,7 @@ export class AdminRolesController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: RoleResponseDto })
   update(@Param('id') id: string, @Body() dto: UpdateRoleDto) {
-    return this.rolesService.update(id, dto);
+    return this.rolesService.update(id, dto).then(RoleMapper.toResponse);
   }
 
   @Delete(':id')
@@ -98,6 +99,8 @@ export class AdminRolesController {
     @Param('id') id: string,
     @Body() dto: AssignPermissionsDto,
   ) {
-    return this.rolesService.assignPermissions(id, dto.permissionIds);
+    return this.rolesService
+      .assignPermissions(id, dto.permissionIds)
+      .then(RoleMapper.toResponse);
   }
 }

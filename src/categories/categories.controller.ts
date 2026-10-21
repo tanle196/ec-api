@@ -12,6 +12,8 @@ import {
   CategoryResponseDto,
   CategoryTreeNodeDto,
 } from './dto/category-response.dto';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { CategoryMapper } from './mapper/category.mapper';
 
 @ApiTags('categories')
 @Controller('categories')
@@ -22,7 +24,9 @@ export class CategoriesController {
   @ApiOperation({ summary: 'List categories (paginated)' })
   @ApiOkResponse({ type: CategoryPaginatedResponseDto })
   findAll(@Query() query: CategoryListQueryDto) {
-    return this.categoriesService.findAll(query);
+    return this.categoriesService
+      .findAll(query)
+      .then((page) => mapPaginated(page, CategoryMapper.toResponse));
   }
 
   @Get('tree')
@@ -37,7 +41,9 @@ export class CategoriesController {
   @ApiParam({ name: 'slug', example: 'smartphones' })
   @ApiOkResponse({ type: CategoryResponseDto })
   findBySlug(@Param('slug') slug: string) {
-    return this.categoriesService.findBySlug(slug);
+    return this.categoriesService
+      .findBySlug(slug)
+      .then(CategoryMapper.toResponse);
   }
 
   @Get(':id')
@@ -45,6 +51,6 @@ export class CategoriesController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: CategoryResponseDto })
   findOne(@Param('id') id: string) {
-    return this.categoriesService.findOne(id);
+    return this.categoriesService.findOne(id).then(CategoryMapper.toResponse);
   }
 }

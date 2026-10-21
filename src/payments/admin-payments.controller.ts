@@ -29,6 +29,9 @@ import {
   AdminPaymentResponseDto,
 } from './dto/admin-payment-response.dto';
 import { PaymentsService } from './payments.service';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { PaymentMapper } from './mapper/payment.mapper';
+import { RefundMapper } from './mapper/refund.mapper';
 
 @ApiTags('Admin: payments')
 @Controller('admin/payments')
@@ -44,7 +47,9 @@ export class AdminPaymentsController {
   findAll(
     @Query() query: PaymentQueryDto,
   ): Promise<AdminPaymentPaginatedResponseDto> {
-    return this.paymentsService.findAll(query, undefined, true);
+    return this.paymentsService
+      .findAll(query, undefined, true)
+      .then((page) => mapPaginated(page, PaymentMapper.toAdminResponse));
   }
 
   @Get(':id')
@@ -53,7 +58,7 @@ export class AdminPaymentsController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: AdminPaymentResponseDto })
   findOne(@Param('id') id: string): Promise<AdminPaymentResponseDto> {
-    return this.paymentsService.findOne(id);
+    return this.paymentsService.findOne(id).then(PaymentMapper.toAdminResponse);
   }
 
   @Patch(':id/status')
@@ -66,7 +71,9 @@ export class AdminPaymentsController {
     @Param('id') id: string,
     @Body() dto: UpdatePaymentStatusDto,
   ): Promise<AdminPaymentResponseDto> {
-    return this.paymentsService.updateStatus(id, dto, user.id);
+    return this.paymentsService
+      .updateStatus(id, dto, user.id)
+      .then(PaymentMapper.toAdminResponse);
   }
 
   @Post(':id/refunds')
@@ -81,7 +88,9 @@ export class AdminPaymentsController {
     @Param('id') id: string,
     @Body() dto: CreateRefundDto,
   ): Promise<RefundResponseDto> {
-    return this.paymentsService.createRefund(id, dto, user.id);
+    return this.paymentsService
+      .createRefund(id, dto, user.id)
+      .then(RefundMapper.toResponse);
   }
 
   @Get(':id/refunds')
@@ -90,6 +99,8 @@ export class AdminPaymentsController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: [RefundResponseDto] })
   findRefunds(@Param('id') id: string): Promise<RefundResponseDto[]> {
-    return this.paymentsService.findRefunds(id);
+    return this.paymentsService
+      .findRefunds(id)
+      .then(RefundMapper.toResponseList);
   }
 }

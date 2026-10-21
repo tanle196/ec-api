@@ -41,3 +41,8 @@ export function Paginated<T>(itemType: Type<T>) {
   }
   return PaginatedResponse;
 }
+
+export const mapPaginated = <T, R>(
+  page: PaginatedResponseDto<T>,
+  mapper: (item: T) => R,
+): PaginatedResponseDto<R> => ({ ...page, data: page.data.map(mapper) });

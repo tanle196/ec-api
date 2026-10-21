@@ -18,7 +18,6 @@ export class RefundRequestResponseDto {
   @ApiProperty() reason!: string;
   @ApiProperty({ enum: RefundRequestStatus }) status!: RefundRequestStatus;
   @ApiPropertyOptional() adminNote!: string | null;
-  @ApiPropertyOptional() reviewedBy!: string | null;
   @ApiPropertyOptional() reviewedAt!: Date | null;
   @ApiPropertyOptional() refund_id!: string | null;
   @ApiProperty({ type: [RefundRequestItemResponseDto] })

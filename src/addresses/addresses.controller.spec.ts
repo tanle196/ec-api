@@ -5,7 +5,23 @@ import { AddressesController } from './addresses.controller';
 
 describe('AddressesController', () => {
   const user = { id: 'user-1' };
-  const address = { id: 'address-1', fullName: 'Nguyễn Văn A' };
+  const createdAt = new Date('2026-01-01');
+  const response = {
+    id: 'address-1',
+    fullName: 'Nguyễn Văn A',
+    phone: '0901234567',
+    addressLine1: '123 Đường Lê Lợi',
+    addressLine2: null,
+    city: 'Thành phố Hồ Chí Minh',
+    province: 'Hồ Chí Minh',
+    country: 'VN',
+    postalCode: null,
+    isDefault: true,
+    createdAt,
+    updatedAt: createdAt,
+  };
+  // The entity carries owner/relation fields that must not reach the client.
+  const address = { ...response, user_id: 'user-1', user: { id: 'user-1' } };
 
   const buildController = () => {
     const addressesService = {
@@ -37,7 +53,7 @@ describe('AddressesController', () => {
     const result = await controller.findAll(user as never);
 
     expect(addressesService.findAllByUser).toHaveBeenCalledWith('user-1');
-    expect(result).toEqual([address]);
+    expect(result).toEqual([response]);
   });
 
   it('create creates an address for the current user', async () => {
@@ -53,7 +69,7 @@ describe('AddressesController', () => {
     const result = await controller.create(user as never, dto);
 
     expect(addressesService.create).toHaveBeenCalledWith('user-1', dto);
-    expect(result).toBe(address);
+    expect(result).toEqual(response);
   });
 
   it('findOne fetches the address scoped to the current user', async () => {
@@ -65,7 +81,7 @@ describe('AddressesController', () => {
       'address-1',
       'user-1',
     );
-    expect(result).toBe(address);
+    expect(result).toEqual(response);
   });
 
   it('update updates the address scoped to the current user', async () => {
@@ -79,7 +95,7 @@ describe('AddressesController', () => {
       'user-1',
       dto,
     );
-    expect(result).toBe(address);
+    expect(result).toEqual(response);
   });
 
   it('remove deletes the address scoped to the current user with 204', async () => {
@@ -106,7 +122,7 @@ describe('AddressesController', () => {
       'address-1',
       'user-1',
     );
-    expect(result).toBe(address);
+    expect(result).toEqual(response);
   });
 
   it('propagates service errors', async () => {

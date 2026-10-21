@@ -23,6 +23,7 @@ import { CartsService } from './carts.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 import { CartResponseDto } from './dto/cart-response.dto';
+import { CartMapper } from './mapper/cart.mapper';
 
 @ApiTags('carts')
 @Controller('carts')
@@ -35,7 +36,7 @@ export class CartsController {
   @ApiOperation({ summary: 'Get my cart' })
   @ApiOkResponse({ type: CartResponseDto })
   getCart(@CurrentUser() user: ICurrentUser): Promise<CartResponseDto> {
-    return this.cartsService.getCart(user.id!);
+    return this.cartsService.getCart(user.id!).then(CartMapper.toResponse);
   }
 
   @Post('me/items')
@@ -47,7 +48,7 @@ export class CartsController {
     @CurrentUser() user: ICurrentUser,
     @Body() dto: AddCartItemDto,
   ): Promise<CartResponseDto> {
-    return this.cartsService.addItem(user.id!, dto);
+    return this.cartsService.addItem(user.id!, dto).then(CartMapper.toResponse);
   }
 
   @Patch('me/items/:itemId')
@@ -59,7 +60,9 @@ export class CartsController {
     @Param('itemId') itemId: string,
     @Body() dto: UpdateCartItemDto,
   ): Promise<CartResponseDto> {
-    return this.cartsService.updateItem(user.id!, itemId, dto);
+    return this.cartsService
+      .updateItem(user.id!, itemId, dto)
+      .then(CartMapper.toResponse);
   }
 
   @Delete('me/items/:itemId')
@@ -70,13 +73,15 @@ export class CartsController {
     @CurrentUser() user: ICurrentUser,
     @Param('itemId') itemId: string,
   ): Promise<CartResponseDto> {
-    return this.cartsService.removeItem(user.id!, itemId);
+    return this.cartsService
+      .removeItem(user.id!, itemId)
+      .then(CartMapper.toResponse);
   }
 
   @Delete('me')
   @ApiOperation({ summary: 'Clear all items from cart' })
   @ApiNoContentResponse()
   clearCart(@CurrentUser() user: ICurrentUser): Promise<CartResponseDto> {
-    return this.cartsService.clearCart(user.id!);
+    return this.cartsService.clearCart(user.id!).then(CartMapper.toResponse);
   }
 }

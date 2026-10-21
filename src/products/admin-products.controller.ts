@@ -42,6 +42,8 @@ import {
   AdminProductResponseDto,
   AdminTagResponseDto,
 } from './dto/admin-product-response.dto';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { ProductMapper } from './mapper/product.mapper';
 
 @ApiTags('Admin: products')
 @Controller('admin/products')
@@ -57,7 +59,9 @@ export class AdminProductsController {
   @ApiOperation({ summary: 'List products (paginated, filterable)' })
   @ApiOkResponse({ type: ProductPaginatedResponseDto })
   findAll(@Query() query: ProductListQueryDto) {
-    return this.productsService.findAll(query);
+    return this.productsService
+      .findAll(query)
+      .then((page) => mapPaginated(page, ProductMapper.toListItem));
   }
 
   @Get(':id')
@@ -66,7 +70,7 @@ export class AdminProductsController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: AdminProductResponseDto })
   findOne(@Param('id') id: string): Promise<AdminProductResponseDto> {
-    return this.productsService.findOne(id);
+    return this.productsService.findOne(id).then(ProductMapper.toResponse);
   }
 
   @Post()
@@ -74,7 +78,7 @@ export class AdminProductsController {
   @ApiOperation({ summary: 'Create a new product' })
   @ApiResponse({ status: 201, type: AdminProductResponseDto })
   create(@Body() dto: CreateProductDto): Promise<AdminProductResponseDto> {
-    return this.productsService.create(dto);
+    return this.productsService.create(dto).then(ProductMapper.toResponse);
   }
 
   @Patch(':id')
@@ -83,7 +87,7 @@ export class AdminProductsController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: AdminProductResponseDto })
   update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
-    return this.productsService.update(id, dto);
+    return this.productsService.update(id, dto).then(ProductMapper.toResponse);
   }
 
   @Delete(':id')
@@ -103,7 +107,7 @@ export class AdminProductsController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiResponse({ status: 201, type: ProductImageResponseDto })
   addImage(@Param('id') id: string, @Body() dto: CreateProductImageDto) {
-    return this.productsService.addImage(id, dto);
+    return this.productsService.addImage(id, dto).then(ProductMapper.toImage);
   }
 
   @Post(':id/images/upload')
@@ -134,12 +138,14 @@ export class AdminProductsController {
     @Body('sortOrder') sortOrder?: string,
     @Body('variant_id') variant_id?: string,
   ): Promise<ProductImageResponseDto> {
-    return this.productsService.uploadImage(id, file, {
-      alt,
-      isPrimary: isPrimary === 'true',
-      sortOrder: sortOrder ? parseInt(sortOrder, 10) : 0,
-      variant_id,
-    });
+    return this.productsService
+      .uploadImage(id, file, {
+        alt,
+        isPrimary: isPrimary === 'true',
+        sortOrder: sortOrder ? parseInt(sortOrder, 10) : 0,
+        variant_id,
+      })
+      .then(ProductMapper.toImage);
   }
 
   @Delete(':id/images/:imageId')
@@ -162,7 +168,9 @@ export class AdminProductsController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiResponse({ status: 201, type: ProductVariantResponseDto })
   addVariant(@Param('id') id: string, @Body() dto: CreateProductVariantDto) {
-    return this.productsService.addVariant(id, dto);
+    return this.productsService
+      .addVariant(id, dto)
+      .then(ProductMapper.toVariant);
   }
 
   @Patch(':id/variants/:variantId')
@@ -176,7 +184,9 @@ export class AdminProductsController {
     @Param('variantId') variantId: string,
     @Body() dto: UpdateProductVariantDto,
   ) {
-    return this.productsService.updateVariant(id, variantId, dto);
+    return this.productsService
+      .updateVariant(id, variantId, dto)
+      .then(ProductMapper.toVariant);
   }
 
   @Delete(':id/variants/:variantId')
@@ -205,7 +215,7 @@ export class AdminTagsController {
   @ApiOperation({ summary: 'Create a tag' })
   @ApiResponse({ status: 201, type: AdminTagResponseDto })
   createTag(@Body() dto: CreateTagDto): Promise<AdminTagResponseDto> {
-    return this.productsService.createTag(dto);
+    return this.productsService.createTag(dto).then(ProductMapper.toTag);
   }
 
   @Delete(':id')

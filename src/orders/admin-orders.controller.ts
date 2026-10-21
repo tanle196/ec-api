@@ -28,6 +28,8 @@ import {
 import { OrderStatusHistoryResponseDto } from './dto/order-status-history-response.dto';
 import { OrderStatusChangeActor } from './enums/order-status-change-actor.enum';
 import { OrdersService } from './orders.service';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { OrderMapper } from './mapper/order.mapper';
 
 @ApiTags('Admin: orders')
 @Controller('admin/orders')
@@ -43,7 +45,9 @@ export class AdminOrdersController {
   findAll(
     @Query() query: OrderListQueryDto,
   ): Promise<AdminOrderPaginatedResponseDto> {
-    return this.ordersService.findAll(query, undefined, true);
+    return this.ordersService
+      .findAll(query, undefined, true)
+      .then((page) => mapPaginated(page, OrderMapper.toListItem));
   }
 
   @Get(':id')
@@ -52,7 +56,7 @@ export class AdminOrdersController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: AdminOrderResponseDto })
   findOne(@Param('id') id: string): Promise<AdminOrderResponseDto> {
-    return this.ordersService.findOne(id);
+    return this.ordersService.findOne(id).then(OrderMapper.toResponse);
   }
 
   @Patch(':id/status')
@@ -65,10 +69,12 @@ export class AdminOrdersController {
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
   ): Promise<AdminOrderResponseDto> {
-    return this.ordersService.updateStatus(id, dto, {
-      actorType: OrderStatusChangeActor.ADMIN,
-      actorId: user.id,
-    });
+    return this.ordersService
+      .updateStatus(id, dto, {
+        actorType: OrderStatusChangeActor.ADMIN,
+        actorId: user.id,
+      })
+      .then(OrderMapper.toResponse);
   }
 
   @Get(':id/history')
@@ -79,6 +85,8 @@ export class AdminOrdersController {
   getHistory(
     @Param('id') id: string,
   ): Promise<OrderStatusHistoryResponseDto[]> {
-    return this.ordersService.getStatusHistory(id);
+    return this.ordersService
+      .getStatusHistory(id)
+      .then(OrderMapper.toStatusHistoryList);
   }
 }

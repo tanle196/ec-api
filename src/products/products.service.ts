@@ -18,7 +18,6 @@ import { CreateProductVariantDto } from './dto/create-product-variant.dto';
 import { UpdateProductVariantDto } from './dto/update-product-variant.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
-import { ProductListItemDto } from './dto/product-response.dto';
 import { ProductStatus } from './enums/product-status.enum';
 import { MediaService } from '@/media/media.service';
 import { generateUniqueSlug } from '@/common/utils/slug.util';
@@ -107,7 +106,7 @@ export class ProductsService {
   async findAll(
     query: ProductListQueryDto,
     { publishedOnly = false }: { publishedOnly?: boolean } = {},
-  ): Promise<PaginatedResponseDto<ProductListItemDto>> {
+  ): Promise<PaginatedResponseDto<Product>> {
     const {
       page = 1,
       limit = 20,

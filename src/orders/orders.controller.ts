@@ -29,6 +29,8 @@ import {
 } from './dto/order-response.dto';
 import { OrderStatusHistoryResponseDto } from './dto/order-status-history-response.dto';
 import { OrdersService } from './orders.service';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { OrderMapper } from './mapper/order.mapper';
 
 @ApiTags('orders')
 @Controller('orders')
@@ -44,7 +46,9 @@ export class OrdersController {
     @CurrentUser() user: ICurrentUser,
     @Body() dto: CreateOrderDto,
   ): Promise<OrderResponseDto> {
-    return this.ordersService.create(user.id!, dto);
+    return this.ordersService
+      .create(user.id!, dto)
+      .then(OrderMapper.toResponse);
   }
 
   @Post('checkout')
@@ -54,7 +58,9 @@ export class OrdersController {
     @CurrentUser() user: ICurrentUser,
     @Body() dto: CheckoutDto,
   ): Promise<OrderResponseDto> {
-    return this.ordersService.checkout(user.id!, dto);
+    return this.ordersService
+      .checkout(user.id!, dto)
+      .then(OrderMapper.toResponse);
   }
 
   @Get('me')
@@ -64,7 +70,9 @@ export class OrdersController {
     @CurrentUser() user: ICurrentUser,
     @Query() query: OrderListQueryDto,
   ): Promise<OrderPaginatedResponseDto> {
-    return this.ordersService.findAll(query, user.id, false);
+    return this.ordersService
+      .findAll(query, user.id, false)
+      .then((page) => mapPaginated(page, OrderMapper.toListItem));
   }
 
   @Get('me/:id')
@@ -75,7 +83,7 @@ export class OrdersController {
     @CurrentUser() user: ICurrentUser,
     @Param('id') id: string,
   ): Promise<OrderResponseDto> {
-    return this.ordersService.findOne(id, user.id);
+    return this.ordersService.findOne(id, user.id).then(OrderMapper.toResponse);
   }
 
   @Patch('me/:id')
@@ -89,7 +97,9 @@ export class OrdersController {
     @Param('id') id: string,
     @Body() dto: UpdateOrderDto,
   ): Promise<OrderResponseDto> {
-    return this.ordersService.update(id, user.id!, dto);
+    return this.ordersService
+      .update(id, user.id!, dto)
+      .then(OrderMapper.toResponse);
   }
 
   @Patch('me/:id/cancel')
@@ -100,7 +110,7 @@ export class OrdersController {
     @CurrentUser() user: ICurrentUser,
     @Param('id') id: string,
   ): Promise<OrderResponseDto> {
-    return this.ordersService.cancel(id, user.id!);
+    return this.ordersService.cancel(id, user.id!).then(OrderMapper.toResponse);
   }
 
   @Get('me/:id/history')
@@ -111,6 +121,8 @@ export class OrdersController {
     @CurrentUser() user: ICurrentUser,
     @Param('id') id: string,
   ): Promise<OrderStatusHistoryResponseDto[]> {
-    return this.ordersService.getStatusHistory(id, user.id);
+    return this.ordersService
+      .getStatusHistory(id, user.id)
+      .then(OrderMapper.toStatusHistoryList);
   }
 }

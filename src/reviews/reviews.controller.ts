@@ -28,6 +28,8 @@ import {
   ReviewPaginatedResponseDto,
   ReviewResponseDto,
 } from './dto/review-response.dto';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { ReviewMapper } from './mapper/review.mapper';
 
 @ApiTags('reviews')
 @Controller('reviews')
@@ -43,7 +45,9 @@ export class ReviewsController {
     @CurrentUser() user: ICurrentUser,
     @Body() dto: CreateReviewDto,
   ): Promise<ReviewResponseDto> {
-    return this.reviewsService.create(user.id!, dto);
+    return this.reviewsService
+      .create(user.id!, dto)
+      .then(ReviewMapper.toResponse);
   }
 
   @Get('me')
@@ -55,7 +59,9 @@ export class ReviewsController {
     @CurrentUser() user: ICurrentUser,
     @Query() query: ReviewListQueryDto,
   ): Promise<ReviewPaginatedResponseDto> {
-    return this.reviewsService.findMyReviews(user.id!, query);
+    return this.reviewsService
+      .findMyReviews(user.id!, query)
+      .then((page) => mapPaginated(page, ReviewMapper.toResponse));
   }
 
   @Patch(':id')
@@ -70,7 +76,9 @@ export class ReviewsController {
     @Body() dto: UpdateReviewDto,
   ): Promise<ReviewResponseDto> {
     const isAdmin = user.permissions.includes('review.update');
-    return this.reviewsService.update(id, user.id!, dto, isAdmin);
+    return this.reviewsService
+      .update(id, user.id!, dto, isAdmin)
+      .then(ReviewMapper.toResponse);
   }
 
   @Delete(':id')
@@ -103,6 +111,8 @@ export class ProductReviewsController {
     @Param('productId') productId: string,
     @Query() query: ReviewListQueryDto,
   ): Promise<ReviewPaginatedResponseDto> {
-    return this.reviewsService.findApproved(productId, query);
+    return this.reviewsService
+      .findApproved(productId, query)
+      .then((page) => mapPaginated(page, ReviewMapper.toResponse));
   }
 }

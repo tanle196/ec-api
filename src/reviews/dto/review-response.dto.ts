@@ -10,7 +10,8 @@ export class ReviewAuthorDto {
 export class ReviewResponseDto {
   @ApiProperty() id!: string;
   @ApiProperty() user_id!: string;
-  @ApiProperty({ type: ReviewAuthorDto }) user!: ReviewAuthorDto;
+  @ApiPropertyOptional({ type: ReviewAuthorDto, nullable: true })
+  user!: ReviewAuthorDto | null;
   @ApiProperty() product_id!: string;
   @ApiProperty() rating!: number;
   @ApiPropertyOptional({ nullable: true }) title!: string | null;

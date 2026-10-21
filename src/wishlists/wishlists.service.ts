@@ -9,6 +9,7 @@ import { Product } from '@/products/entities/product.entity';
 import { AddToWishlistDto } from './dto/add-to-wishlist.dto';
 import { WishlistResponseDto } from './dto/wishlist-response.dto';
 import { Wishlist } from './entities/wishlist.entity';
+import { WishlistMapper } from './mapper/wishlist.mapper';
 
 @Injectable()
 export class WishlistsService {
@@ -26,7 +27,7 @@ export class WishlistsService {
       order: { createdAt: 'DESC' },
     });
 
-    return { items, total: items.length };
+    return WishlistMapper.toResponse(items);
   }
 
   async addProduct(

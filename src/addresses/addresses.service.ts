@@ -8,7 +8,6 @@ import { Repository } from 'typeorm';
 import { Address } from './entities/address.entity';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
-import { AddressResponseDto } from './dto/address-response.dto';
 
 @Injectable()
 export class AddressesService {
@@ -17,24 +16,21 @@ export class AddressesService {
     private readonly repo: Repository<Address>,
   ) {}
 
-  async findAllByUser(userId: string): Promise<AddressResponseDto[]> {
+  async findAllByUser(userId: string): Promise<Address[]> {
     return this.repo.find({
       where: { user_id: userId },
       order: { isDefault: 'DESC', createdAt: 'ASC' },
     });
   }
 
-  async findOne(id: string, userId: string): Promise<AddressResponseDto> {
+  async findOne(id: string, userId: string): Promise<Address> {
     const address = await this.repo.findOne({ where: { id } });
     if (!address) throw new NotFoundException('Address not found');
     if (address.user_id !== userId) throw new ForbiddenException();
     return address;
   }
 
-  async create(
-    userId: string,
-    dto: CreateAddressDto,
-  ): Promise<AddressResponseDto> {
+  async create(userId: string, dto: CreateAddressDto): Promise<Address> {
     if (dto.isDefault) {
       await this.repo.update({ user_id: userId }, { isDefault: false });
     }
@@ -47,7 +43,7 @@ export class AddressesService {
     id: string,
     userId: string,
     dto: UpdateAddressDto,
-  ): Promise<AddressResponseDto> {
+  ): Promise<Address> {
     const address = await this.findOne(id, userId);
 
     if (dto.isDefault) {
@@ -63,7 +59,7 @@ export class AddressesService {
     await this.repo.delete(address.id);
   }
 
-  async setDefault(id: string, userId: string): Promise<AddressResponseDto> {
+  async setDefault(id: string, userId: string): Promise<Address> {
     await this.findOne(id, userId);
     await this.repo.update({ user_id: userId }, { isDefault: false });
     await this.repo.update(id, { isDefault: true });

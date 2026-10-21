@@ -6,6 +6,7 @@ import {
   ProductReviewsController,
   ReviewsController,
 } from './reviews.controller';
+import { ReviewMapper } from './mapper/review.mapper';
 
 const handler = (cls: { prototype: object }, method: string) =>
   Object.getOwnPropertyDescriptor(cls.prototype, method)?.value as object;
@@ -13,13 +14,38 @@ const handler = (cls: { prototype: object }, method: string) =>
 describe('Review controllers', () => {
   const service = {
     create: jest.fn().mockResolvedValue('create'),
-    findMyReviews: jest.fn().mockResolvedValue('findMyReviews'),
+    findMyReviews: jest.fn().mockResolvedValue({
+      data: ['findMyReviews'],
+      total: 1,
+      page: 1,
+      limit: 20,
+    }),
     update: jest.fn().mockResolvedValue('update'),
     remove: jest.fn().mockResolvedValue('remove'),
-    findApproved: jest.fn().mockResolvedValue('findApproved'),
-    findAll: jest.fn().mockResolvedValue('findAll'),
+    findApproved: jest.fn().mockResolvedValue({
+      data: ['findApproved'],
+      total: 1,
+      page: 1,
+      limit: 20,
+    }),
+    findAll: jest
+      .fn()
+      .mockResolvedValue({ data: ['findAll'], total: 1, page: 1, limit: 20 }),
     approve: jest.fn().mockResolvedValue('approve'),
   };
+
+  const mappedPage = (item: string) => ({
+    data: [{ mapped: item }],
+    total: 1,
+    page: 1,
+    limit: 20,
+  });
+
+  beforeAll(() => {
+    jest
+      .spyOn(ReviewMapper, 'toResponse')
+      .mockImplementation((r) => ({ mapped: r }) as never);
+  });
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -40,11 +66,12 @@ describe('Review controllers', () => {
     );
 
     it('create and findMyReviews use the current user', async () => {
-      await controller.create(customer, {
-        product_id: 'p',
-        rating: 5,
-      });
-      await controller.findMyReviews(customer, { page: 1 });
+      await expect(
+        controller.create(customer, { product_id: 'p', rating: 5 }),
+      ).resolves.toEqual({ mapped: 'create' });
+      await expect(
+        controller.findMyReviews(customer, { page: 1 }),
+      ).resolves.toEqual(mappedPage('findMyReviews'));
 
       expect(service.create).toHaveBeenCalledWith('user-1', {
         product_id: 'p',
@@ -59,11 +86,13 @@ describe('Review controllers', () => {
     ])(
       'update with permissions %p passes isAdmin=%p',
       async (perms, isAdmin) => {
-        await controller.update(
-          'review-1',
-          { id: 'user-1', permissions: perms } as never,
-          { rating: 3 },
-        );
+        await expect(
+          controller.update(
+            'review-1',
+            { id: 'user-1', permissions: perms } as never,
+            { rating: 3 },
+          ),
+        ).resolves.toEqual({ mapped: 'update' });
 
         expect(service.update).toHaveBeenCalledWith(
           'review-1',
@@ -104,8 +133,8 @@ describe('Review controllers', () => {
         handler(ProductReviewsController, 'findApproved'),
       ),
     ).toBeUndefined();
-    await expect(controller.findApproved('p', { page: 1 })).resolves.toBe(
-      'findApproved',
+    await expect(controller.findApproved('p', { page: 1 })).resolves.toEqual(
+      mappedPage('findApproved'),
     );
     expect(service.findApproved).toHaveBeenCalledWith('p', { page: 1 });
   });
@@ -126,7 +155,9 @@ describe('Review controllers', () => {
           handler(AdminReviewsController, 'findAll'),
         ),
       ).toEqual(['review.read']);
-      await expect(controller.findAll({ page: 1 })).resolves.toBe('findAll');
+      await expect(controller.findAll({ page: 1 })).resolves.toEqual(
+        mappedPage('findAll'),
+      );
     });
 
     it('approve requires review.update', async () => {
@@ -136,7 +167,9 @@ describe('Review controllers', () => {
           handler(AdminReviewsController, 'approve'),
         ),
       ).toEqual(['review.update']);
-      await controller.approve('review-1', false);
+      await expect(controller.approve('review-1', false)).resolves.toEqual({
+        mapped: 'approve',
+      });
       expect(service.approve).toHaveBeenCalledWith('review-1', false);
     });
   });

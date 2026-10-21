@@ -3,6 +3,7 @@ import { PermissionsGuard } from '@/permissions/guards/permissions.guard';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { AdminCategoriesController } from './admin-categories.controller';
 import { CategoriesController } from './categories.controller';
+import { CategoryMapper } from './mapper/category.mapper';
 
 const permissionsOf = (method: string) =>
   Reflect.getMetadata(
@@ -13,7 +14,9 @@ const permissionsOf = (method: string) =>
 
 describe('Category controllers', () => {
   const service = {
-    findAll: jest.fn().mockResolvedValue('findAll'),
+    findAll: jest
+      .fn()
+      .mockResolvedValue({ data: ['findAll'], total: 1, page: 1, limit: 20 }),
     findTree: jest.fn().mockResolvedValue('findTree'),
     findBySlug: jest.fn().mockResolvedValue('findBySlug'),
     findOne: jest.fn().mockResolvedValue('findOne'),
@@ -24,7 +27,21 @@ describe('Category controllers', () => {
     remove: jest.fn().mockResolvedValue('remove'),
   };
 
+  beforeAll(() => {
+    jest
+      .spyOn(CategoryMapper, 'toResponse')
+      .mockImplementation((c) => ({ mapped: c }) as never);
+  });
+
   beforeEach(() => jest.clearAllMocks());
+
+  // findTree is already mapped by the service; remove returns a plain result.
+  const expected = (method: string): unknown => {
+    if (method === 'findAll')
+      return { data: [{ mapped: 'findAll' }], total: 1, page: 1, limit: 20 };
+    if (method === 'findTree' || method === 'remove') return method;
+    return { mapped: method };
+  };
 
   describe('CategoriesController (public)', () => {
     const controller = new CategoriesController(service as never);
@@ -37,7 +54,7 @@ describe('Category controllers', () => {
     ] as const)('%s delegates', async (method, args) => {
       await expect(
         (controller[method] as (...a: unknown[]) => Promise<unknown>)(...args),
-      ).resolves.toBe(method);
+      ).resolves.toEqual(expected(method));
       expect(service[method]).toHaveBeenCalledWith(...args);
     });
   });
@@ -64,7 +81,7 @@ describe('Category controllers', () => {
       expect(permissionsOf(method)).toEqual([perm]);
       await expect(
         (controller[method] as (...a: unknown[]) => Promise<unknown>)(...args),
-      ).resolves.toBe(method);
+      ).resolves.toEqual(expected(method));
       expect(service[method]).toHaveBeenCalledWith(...args);
     });
   });

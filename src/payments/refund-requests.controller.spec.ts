@@ -3,6 +3,7 @@ import { PermissionsGuard } from '@/permissions/guards/permissions.guard';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { AdminRefundRequestsController } from './admin-refund-requests.controller';
 import { RefundRequestsController } from './refund-requests.controller';
+import { RefundRequestMapper } from './mapper/refund-request.mapper';
 
 const permissionsOf = (method: string) =>
   Reflect.getMetadata(
@@ -16,13 +17,26 @@ const permissionsOf = (method: string) =>
 describe('Refund request controllers', () => {
   const service = {
     create: jest.fn().mockResolvedValue('create'),
-    findMine: jest.fn().mockResolvedValue('findMine'),
+    findMine: jest
+      .fn()
+      .mockResolvedValue({ data: ['findMine'], total: 1, page: 1, limit: 20 }),
     findMineOne: jest.fn().mockResolvedValue('findMineOne'),
-    findAll: jest.fn().mockResolvedValue('findAll'),
+    findAll: jest
+      .fn()
+      .mockResolvedValue({ data: ['findAll'], total: 1, page: 1, limit: 20 }),
     findOne: jest.fn().mockResolvedValue('findOne'),
     approve: jest.fn().mockResolvedValue('approve'),
     reject: jest.fn().mockResolvedValue('reject'),
   };
+
+  beforeAll(() => {
+    jest
+      .spyOn(RefundRequestMapper, 'toResponse')
+      .mockImplementation((r) => ({ public: r }) as never);
+    jest
+      .spyOn(RefundRequestMapper, 'toAdminResponse')
+      .mockImplementation((r) => ({ admin: r }) as never);
+  });
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -39,11 +53,18 @@ describe('Refund request controllers', () => {
     it('scopes every call to the current user', async () => {
       const dto = { order_id: 'o', reason: 'damaged' };
 
-      await expect(controller.create(user, dto as never)).resolves.toBe(
-        'create',
-      );
-      await controller.findMine(user, { page: 1 });
-      await controller.findMineOne(user, 'r');
+      await expect(controller.create(user, dto as never)).resolves.toEqual({
+        public: 'create',
+      });
+      await expect(controller.findMine(user, { page: 1 })).resolves.toEqual({
+        data: [{ public: 'findMine' }],
+        total: 1,
+        page: 1,
+        limit: 20,
+      });
+      await expect(controller.findMineOne(user, 'r')).resolves.toEqual({
+        public: 'findMineOne',
+      });
 
       expect(service.create).toHaveBeenCalledWith('user-1', dto);
       expect(service.findMine).toHaveBeenCalledWith('user-1', { page: 1 });
@@ -71,16 +92,27 @@ describe('Refund request controllers', () => {
     });
 
     it('reads are delegated', async () => {
-      await controller.findAll({ page: 1 });
-      await controller.findOne('r');
+      await expect(controller.findAll({ page: 1 })).resolves.toEqual({
+        data: [{ admin: 'findAll' }],
+        total: 1,
+        page: 1,
+        limit: 20,
+      });
+      await expect(controller.findOne('r')).resolves.toEqual({
+        admin: 'findOne',
+      });
 
       expect(service.findAll).toHaveBeenCalledWith({ page: 1 });
       expect(service.findOne).toHaveBeenCalledWith('r');
     });
 
     it('approve/reject record the reviewing admin', async () => {
-      await controller.approve(admin, 'r', { adminNote: 'ok' } as never);
-      await controller.reject(admin, 'r', { adminNote: 'no' } as never);
+      await expect(
+        controller.approve(admin, 'r', { adminNote: 'ok' } as never),
+      ).resolves.toEqual({ admin: 'approve' });
+      await expect(
+        controller.reject(admin, 'r', { adminNote: 'no' } as never),
+      ).resolves.toEqual({ admin: 'reject' });
 
       expect(service.approve).toHaveBeenCalledWith('r', 'admin-1', {
         adminNote: 'ok',

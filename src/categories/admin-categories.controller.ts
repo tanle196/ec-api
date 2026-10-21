@@ -34,6 +34,8 @@ import {
   CategoryTreeNodeDto,
 } from './dto/category-response.dto';
 import { AdminCategoryResponseDto } from './dto/admin-category-response.dto';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { CategoryMapper } from './mapper/category.mapper';
 
 @ApiTags('Admin: categories')
 @Controller('admin/categories')
@@ -47,7 +49,9 @@ export class AdminCategoriesController {
   @ApiOperation({ summary: 'List categories (paginated)' })
   @ApiOkResponse({ type: CategoryPaginatedResponseDto })
   findAll(@Query() query: CategoryListQueryDto) {
-    return this.categoriesService.findAll(query);
+    return this.categoriesService
+      .findAll(query)
+      .then((page) => mapPaginated(page, CategoryMapper.toResponse));
   }
 
   @Get('tree')
@@ -64,7 +68,7 @@ export class AdminCategoriesController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: AdminCategoryResponseDto })
   findOne(@Param('id') id: string): Promise<AdminCategoryResponseDto> {
-    return this.categoriesService.findOne(id);
+    return this.categoriesService.findOne(id).then(CategoryMapper.toResponse);
   }
 
   @Post()
@@ -72,7 +76,7 @@ export class AdminCategoriesController {
   @ApiOperation({ summary: 'Create a new category' })
   @ApiResponse({ status: 201, type: AdminCategoryResponseDto })
   create(@Body() dto: CreateCategoryDto): Promise<AdminCategoryResponseDto> {
-    return this.categoriesService.create(dto);
+    return this.categoriesService.create(dto).then(CategoryMapper.toResponse);
   }
 
   @Patch(':id')
@@ -81,7 +85,9 @@ export class AdminCategoriesController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: AdminCategoryResponseDto })
   update(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
-    return this.categoriesService.update(id, dto);
+    return this.categoriesService
+      .update(id, dto)
+      .then(CategoryMapper.toResponse);
   }
 
   @Post(':id/image/upload')
@@ -104,7 +110,9 @@ export class AdminCategoriesController {
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
   ): Promise<AdminCategoryResponseDto> {
-    return this.categoriesService.uploadImage(id, file);
+    return this.categoriesService
+      .uploadImage(id, file)
+      .then(CategoryMapper.toResponse);
   }
 
   @Delete(':id/image')
@@ -113,7 +121,9 @@ export class AdminCategoriesController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: AdminCategoryResponseDto })
   removeImage(@Param('id') id: string) {
-    return this.categoriesService.removeImage(id);
+    return this.categoriesService
+      .removeImage(id)
+      .then(CategoryMapper.toResponse);
   }
 
   @Delete(':id')

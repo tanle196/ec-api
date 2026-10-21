@@ -23,6 +23,8 @@ import {
   AdminReviewPaginatedResponseDto,
   AdminReviewResponseDto,
 } from './dto/admin-review-response.dto';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { ReviewMapper } from './mapper/review.mapper';
 
 @ApiTags('Admin: reviews')
 @Controller('admin/reviews')
@@ -38,7 +40,9 @@ export class AdminReviewsController {
   findAll(
     @Query() query: ReviewListQueryDto,
   ): Promise<AdminReviewPaginatedResponseDto> {
-    return this.reviewsService.findAll(query);
+    return this.reviewsService
+      .findAll(query)
+      .then((page) => mapPaginated(page, ReviewMapper.toResponse));
   }
 
   @Patch(':id/approve')
@@ -50,6 +54,8 @@ export class AdminReviewsController {
     @Param('id') id: string,
     @Body('approved') approved: boolean,
   ): Promise<AdminReviewResponseDto> {
-    return this.reviewsService.approve(id, approved);
+    return this.reviewsService
+      .approve(id, approved)
+      .then(ReviewMapper.toResponse);
   }
 }

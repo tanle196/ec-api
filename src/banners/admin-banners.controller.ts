@@ -35,6 +35,7 @@ import { UpdateBannerDto } from './dto/update-banner.dto';
 import { ReorderBannersDto } from './dto/reorder-banners.dto';
 import { AdminBannerResponseDto } from './dto/admin-banner-response.dto';
 import { BannerPosition } from './enums/banner-position.enum';
+import { BannerMapper } from './mapper/banner.mapper';
 
 @ApiTags('Admin: banners')
 @Controller('admin/banners')
@@ -53,7 +54,9 @@ export class AdminBannersController {
   findAll(
     @Query('position') position?: BannerPosition,
   ): Promise<AdminBannerResponseDto[]> {
-    return this.bannersService.findAll(position);
+    return this.bannersService
+      .findAll(position)
+      .then(BannerMapper.toResponseList);
   }
 
   @Post()
@@ -61,7 +64,7 @@ export class AdminBannersController {
   @ApiOperation({ summary: 'Admin: tạo banner mới' })
   @ApiResponse({ status: 201, type: AdminBannerResponseDto })
   create(@Body() dto: CreateBannerDto): Promise<AdminBannerResponseDto> {
-    return this.bannersService.create(dto);
+    return this.bannersService.create(dto).then(BannerMapper.toResponse);
   }
 
   @Post(':id/upload-image')
@@ -91,7 +94,9 @@ export class AdminBannersController {
     @UploadedFile() file: Express.Multer.File,
     @Body('isMobile') isMobile?: string,
   ): Promise<AdminBannerResponseDto> {
-    return this.bannersService.uploadImage(id, file, isMobile === 'true');
+    return this.bannersService
+      .uploadImage(id, file, isMobile === 'true')
+      .then(BannerMapper.toResponse);
   }
 
   @Patch('reorder')
@@ -112,7 +117,7 @@ export class AdminBannersController {
     @Param('id') id: string,
     @Body() dto: UpdateBannerDto,
   ): Promise<AdminBannerResponseDto> {
-    return this.bannersService.update(id, dto);
+    return this.bannersService.update(id, dto).then(BannerMapper.toResponse);
   }
 
   @Delete(':id')

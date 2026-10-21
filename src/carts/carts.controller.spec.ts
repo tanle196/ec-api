@@ -1,6 +1,7 @@
 import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { CartsController } from './carts.controller';
+import { CartMapper } from './mapper/cart.mapper';
 
 describe('CartsController', () => {
   const user = { id: 'user-1' } as never;
@@ -13,6 +14,12 @@ describe('CartsController', () => {
   };
   const controller = new CartsController(service as never);
 
+  beforeAll(() => {
+    jest
+      .spyOn(CartMapper, 'toResponse')
+      .mockImplementation((cart) => ({ mapped: cart }) as never);
+  });
+
   it('is protected by JwtAuthGuard', () => {
     expect(Reflect.getMetadata(GUARDS_METADATA, CartsController)).toEqual([
       JwtAuthGuard,
@@ -22,15 +29,21 @@ describe('CartsController', () => {
   it('scopes every call to the current user', async () => {
     const add = { variant_id: 'v', quantity: 2 };
 
-    await expect(controller.getCart(user)).resolves.toBe('getCart');
-    await expect(controller.addItem(user, add)).resolves.toBe('addItem');
+    await expect(controller.getCart(user)).resolves.toEqual({
+      mapped: 'getCart',
+    });
+    await expect(controller.addItem(user, add)).resolves.toEqual({
+      mapped: 'addItem',
+    });
     await expect(
       controller.updateItem(user, 'item-1', { quantity: 3 }),
-    ).resolves.toBe('updateItem');
-    await expect(controller.removeItem(user, 'item-1')).resolves.toBe(
-      'removeItem',
-    );
-    await expect(controller.clearCart(user)).resolves.toBe('clearCart');
+    ).resolves.toEqual({ mapped: 'updateItem' });
+    await expect(controller.removeItem(user, 'item-1')).resolves.toEqual({
+      mapped: 'removeItem',
+    });
+    await expect(controller.clearCart(user)).resolves.toEqual({
+      mapped: 'clearCart',
+    });
 
     expect(service.getCart).toHaveBeenCalledWith('user-1');
     expect(service.addItem).toHaveBeenCalledWith('user-1', add);

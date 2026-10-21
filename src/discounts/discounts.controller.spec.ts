@@ -3,6 +3,7 @@ import { PermissionsGuard } from '@/permissions/guards/permissions.guard';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { AdminDiscountsController } from './admin-discounts.controller';
 import { DiscountsController } from './discounts.controller';
+import { DiscountMapper } from './mapper/discount.mapper';
 
 const permissionsOf = (method: string) =>
   Reflect.getMetadata(
@@ -12,10 +13,18 @@ const permissionsOf = (method: string) =>
   ) as string[];
 
 describe('Discount controllers', () => {
+  beforeAll(() => {
+    jest
+      .spyOn(DiscountMapper, 'toResponse')
+      .mockImplementation((d) => ({ mapped: d }) as never);
+  });
+
   const service = {
     validate: jest.fn().mockResolvedValue('validate'),
     create: jest.fn().mockResolvedValue('create'),
-    findAll: jest.fn().mockResolvedValue('findAll'),
+    findAll: jest
+      .fn()
+      .mockResolvedValue({ data: ['findAll'], total: 1, page: 1, limit: 20 }),
     findOne: jest.fn().mockResolvedValue('findOne'),
     update: jest.fn().mockResolvedValue('update'),
     remove: jest.fn().mockResolvedValue('remove'),
@@ -41,6 +50,14 @@ describe('Discount controllers', () => {
       ).toEqual([JwtAuthGuard, PermissionsGuard]);
     });
 
+    const expected: Record<string, unknown> = {
+      create: { mapped: 'create' },
+      findAll: { data: [{ mapped: 'findAll' }], total: 1, page: 1, limit: 20 },
+      findOne: { mapped: 'findOne' },
+      update: { mapped: 'update' },
+      remove: 'remove',
+    };
+
     it.each([
       ['create', 'discount.create', [{ code: 'X' }]],
       ['findAll', 'discount.read', [{ page: 1 }]],
@@ -51,7 +68,7 @@ describe('Discount controllers', () => {
       expect(permissionsOf(method)).toEqual([perm]);
       await expect(
         (controller[method] as (...a: unknown[]) => Promise<unknown>)(...args),
-      ).resolves.toBe(method);
+      ).resolves.toEqual(expected[method]);
       expect(service[method]).toHaveBeenCalledWith(...args);
     });
   });

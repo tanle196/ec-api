@@ -11,7 +11,6 @@ import { CreatePermissionDto } from './dto/create-permission.dto';
 import { UpdatePermissionDto } from './dto/update-permission.dto';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { PermissionListQueryDto } from './dto/permission-list-query.dto';
-import { PermissionResponseDto } from './dto/permission-response.dto';
 
 @Injectable()
 export class PermissionsService {
@@ -46,7 +45,7 @@ export class PermissionsService {
 
   async findAll(
     query: PermissionListQueryDto,
-  ): Promise<PaginatedResponseDto<PermissionResponseDto>> {
+  ): Promise<PaginatedResponseDto<Permission>> {
     const { page = 1, limit = 20, module, action } = query;
     const where: Record<string, unknown> = {};
     if (module) where.module = module;

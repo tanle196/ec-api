@@ -9,6 +9,8 @@ import { UserDetailDto } from './dto/user-detail.dto';
 import { UserMapper } from './mapper/user.mapper';
 import { UserPaginatedResponseDto } from './dto/user-response.dto';
 import { UserProfileDto } from './dto/user-profile.dto';
+import { RoleMapper } from '@/roles/mapper/role.mapper';
+import { PermissionMapper } from '@/permissions/mapper/permission.mapper';
 
 type SafeUserUpdate = Pick<User, 'fullName' | 'avatar'>;
 
@@ -45,8 +47,8 @@ export class UsersService {
       email: user.email,
       fullName: user.fullName,
       avatar: user.avatar,
-      roles: user.roles ?? [],
-      permissions: user.permissions ?? [],
+      roles: RoleMapper.toResponseList(user.roles ?? []),
+      permissions: PermissionMapper.toResponseList(user.permissions ?? []),
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
@@ -65,8 +67,8 @@ export class UsersService {
       email: user.email,
       fullName: user.fullName,
       avatar: user.avatar,
-      roles: user.roles ?? [],
-      permissions: user.permissions ?? [],
+      roles: RoleMapper.toResponseList(user.roles ?? []),
+      permissions: PermissionMapper.toResponseList(user.permissions ?? []),
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };

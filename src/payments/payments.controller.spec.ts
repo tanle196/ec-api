@@ -2,6 +2,8 @@ import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@/permissions/guards/permissions.guard';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { AdminPaymentsController } from './admin-payments.controller';
+import { PaymentMapper } from './mapper/payment.mapper';
+import { RefundMapper } from './mapper/refund.mapper';
 import { PaymentsController } from './payments.controller';
 
 const permissionsOf = (method: string) =>
@@ -14,13 +16,30 @@ const permissionsOf = (method: string) =>
 describe('Payment controllers', () => {
   const service = {
     create: jest.fn().mockResolvedValue('create'),
-    findAll: jest.fn().mockResolvedValue('findAll'),
+    findAll: jest
+      .fn()
+      .mockResolvedValue({ data: ['findAll'], total: 1, page: 1, limit: 20 }),
     findOne: jest.fn().mockResolvedValue('findOne'),
     updateStatus: jest.fn().mockResolvedValue('updateStatus'),
     createRefund: jest.fn().mockResolvedValue('createRefund'),
     findRefunds: jest.fn().mockResolvedValue('findRefunds'),
   };
   const user = { id: 'user-1' } as never;
+
+  beforeAll(() => {
+    jest
+      .spyOn(PaymentMapper, 'toResponse')
+      .mockImplementation((p) => ({ public: p }) as never);
+    jest
+      .spyOn(PaymentMapper, 'toAdminResponse')
+      .mockImplementation((p) => ({ admin: p }) as never);
+    jest
+      .spyOn(RefundMapper, 'toResponse')
+      .mockImplementation((r) => ({ refund: r }) as never);
+    jest
+      .spyOn(RefundMapper, 'toResponseList')
+      .mockImplementation((r) => ({ refunds: r }) as never);
+  });
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -36,11 +55,18 @@ describe('Payment controllers', () => {
     it('scopes every call to the current user', async () => {
       const dto = { order_id: 'o' };
 
-      await expect(controller.create(user, dto as never)).resolves.toBe(
-        'create',
-      );
-      await controller.findMine(user, { page: 1 });
-      await controller.findMineOne(user, 'p');
+      await expect(controller.create(user, dto as never)).resolves.toEqual({
+        public: 'create',
+      });
+      await expect(controller.findMine(user, { page: 1 })).resolves.toEqual({
+        data: [{ public: 'findAll' }],
+        total: 1,
+        page: 1,
+        limit: 20,
+      });
+      await expect(controller.findMineOne(user, 'p')).resolves.toEqual({
+        public: 'findOne',
+      });
 
       expect(service.create).toHaveBeenCalledWith('user-1', dto);
       expect(service.findAll).toHaveBeenCalledWith(
@@ -73,9 +99,18 @@ describe('Payment controllers', () => {
     });
 
     it('lists and reads payments as admin', async () => {
-      await controller.findAll({ page: 1 });
-      await controller.findOne('p');
-      await controller.findRefunds('p');
+      await expect(controller.findAll({ page: 1 })).resolves.toEqual({
+        data: [{ admin: 'findAll' }],
+        total: 1,
+        page: 1,
+        limit: 20,
+      });
+      await expect(controller.findOne('p')).resolves.toEqual({
+        admin: 'findOne',
+      });
+      await expect(controller.findRefunds('p')).resolves.toEqual({
+        refunds: 'findRefunds',
+      });
 
       expect(service.findAll).toHaveBeenCalledWith(
         { page: 1 },
@@ -90,8 +125,12 @@ describe('Payment controllers', () => {
       const statusDto = { status: 'completed' };
       const refundDto = { amount: 10 };
 
-      await controller.updateStatus(admin, 'p', statusDto as never);
-      await controller.createRefund(admin, 'p', refundDto as never);
+      await expect(
+        controller.updateStatus(admin, 'p', statusDto as never),
+      ).resolves.toEqual({ admin: 'updateStatus' });
+      await expect(
+        controller.createRefund(admin, 'p', refundDto as never),
+      ).resolves.toEqual({ refund: 'createRefund' });
 
       expect(service.updateStatus).toHaveBeenCalledWith(
         'p',

@@ -18,6 +18,7 @@ import {
 import { BannersService } from './banners.service';
 import { BannerResponseDto } from './dto/banner-response.dto';
 import { BannerPosition } from './enums/banner-position.enum';
+import { BannerMapper } from './mapper/banner.mapper';
 
 @ApiTags('banners')
 @Controller('banners')
@@ -33,7 +34,9 @@ export class BannersController {
   findActive(
     @Query('position') position?: BannerPosition,
   ): Promise<BannerResponseDto[]> {
-    return this.bannersService.findActive(position);
+    return this.bannersService
+      .findActive(position)
+      .then(BannerMapper.toResponseList);
   }
 
   @Post(':id/click')

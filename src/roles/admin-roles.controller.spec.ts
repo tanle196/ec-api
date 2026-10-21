@@ -2,6 +2,7 @@ import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '@/permissions/guards/permissions.guard';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { AdminRolesController } from './admin-roles.controller';
+import { RoleMapper } from './mapper/role.mapper';
 
 const permissionsOf = (method: string) =>
   Reflect.getMetadata(
@@ -20,6 +21,15 @@ describe('AdminRolesController', () => {
     assignPermissions: jest.fn().mockResolvedValue('assignPermissions'),
   };
   const controller = new AdminRolesController(rolesService as never);
+
+  beforeAll(() => {
+    jest
+      .spyOn(RoleMapper, 'toResponse')
+      .mockImplementation((r) => ({ mapped: r }) as never);
+  });
+
+  // findAll is already mapped by the service; remove returns a plain result.
+  const unmapped = new Set(['findAll', 'remove']);
 
   it('is protected by JwtAuthGuard and PermissionsGuard', () => {
     expect(Reflect.getMetadata(GUARDS_METADATA, AdminRolesController)).toEqual([
@@ -56,7 +66,9 @@ describe('AdminRolesController', () => {
         controller[method] as (...a: unknown[]) => Promise<unknown>
       )(...args);
 
-      expect(result).toBe(serviceMethod);
+      expect(result).toEqual(
+        unmapped.has(serviceMethod) ? serviceMethod : { mapped: serviceMethod },
+      );
       expect(rolesService[serviceMethod]).toHaveBeenCalledWith(...serviceArgs);
     },
   );

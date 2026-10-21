@@ -25,6 +25,8 @@ import {
   RefundRequestResponseDto,
 } from './dto/refund-request-response.dto';
 import { RefundRequestsService } from './refund-requests.service';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { RefundRequestMapper } from './mapper/refund-request.mapper';
 
 @ApiTags('refund-requests')
 @Controller('refund-requests')
@@ -40,7 +42,9 @@ export class RefundRequestsController {
     @CurrentUser() user: ICurrentUser,
     @Body() dto: CreateRefundRequestDto,
   ): Promise<RefundRequestResponseDto> {
-    return this.refundRequestsService.create(user.id!, dto);
+    return this.refundRequestsService
+      .create(user.id!, dto)
+      .then(RefundRequestMapper.toResponse);
   }
 
   @Get('me')
@@ -50,7 +54,9 @@ export class RefundRequestsController {
     @CurrentUser() user: ICurrentUser,
     @Query() query: RefundRequestQueryDto,
   ): Promise<RefundRequestPaginatedResponseDto> {
-    return this.refundRequestsService.findMine(user.id!, query);
+    return this.refundRequestsService
+      .findMine(user.id!, query)
+      .then((page) => mapPaginated(page, RefundRequestMapper.toResponse));
   }
 
   @Get('me/:id')
@@ -61,6 +67,8 @@ export class RefundRequestsController {
     @CurrentUser() user: ICurrentUser,
     @Param('id') id: string,
   ): Promise<RefundRequestResponseDto> {
-    return this.refundRequestsService.findMineOne(user.id!, id);
+    return this.refundRequestsService
+      .findMineOne(user.id!, id)
+      .then(RefundRequestMapper.toResponse);
   }
 }

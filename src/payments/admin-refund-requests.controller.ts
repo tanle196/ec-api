@@ -25,10 +25,12 @@ import {
 } from './dto/review-refund-request.dto';
 import { RefundRequestQueryDto } from './dto/refund-request-query.dto';
 import {
-  RefundRequestPaginatedResponseDto,
-  RefundRequestResponseDto,
-} from './dto/refund-request-response.dto';
+  AdminRefundRequestPaginatedResponseDto,
+  AdminRefundRequestResponseDto,
+} from './dto/admin-refund-request-response.dto';
 import { RefundRequestsService } from './refund-requests.service';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { RefundRequestMapper } from './mapper/refund-request.mapper';
 
 @ApiTags('Admin: refund requests')
 @Controller('admin/refund-requests')
@@ -40,20 +42,24 @@ export class AdminRefundRequestsController {
   @Get()
   @Permissions('refund.read')
   @ApiOperation({ summary: 'Admin: list all refund requests' })
-  @ApiOkResponse({ type: RefundRequestPaginatedResponseDto })
+  @ApiOkResponse({ type: AdminRefundRequestPaginatedResponseDto })
   findAll(
     @Query() query: RefundRequestQueryDto,
-  ): Promise<RefundRequestPaginatedResponseDto> {
-    return this.refundRequestsService.findAll(query);
+  ): Promise<AdminRefundRequestPaginatedResponseDto> {
+    return this.refundRequestsService
+      .findAll(query)
+      .then((page) => mapPaginated(page, RefundRequestMapper.toAdminResponse));
   }
 
   @Get(':id')
   @Permissions('refund.read')
   @ApiOperation({ summary: 'Admin: get refund request detail' })
   @ApiParam({ name: 'id', example: 'uuid-v4' })
-  @ApiOkResponse({ type: RefundRequestResponseDto })
-  findOne(@Param('id') id: string): Promise<RefundRequestResponseDto> {
-    return this.refundRequestsService.findOne(id);
+  @ApiOkResponse({ type: AdminRefundRequestResponseDto })
+  findOne(@Param('id') id: string): Promise<AdminRefundRequestResponseDto> {
+    return this.refundRequestsService
+      .findOne(id)
+      .then(RefundRequestMapper.toAdminResponse);
   }
 
   @Patch(':id/approve')
@@ -63,25 +69,29 @@ export class AdminRefundRequestsController {
       'Admin: approve a refund request (creates and executes the refund)',
   })
   @ApiParam({ name: 'id', example: 'uuid-v4' })
-  @ApiOkResponse({ type: RefundRequestResponseDto })
+  @ApiOkResponse({ type: AdminRefundRequestResponseDto })
   approve(
     @CurrentUser() user: ICurrentUser,
     @Param('id') id: string,
     @Body() dto: ApproveRefundRequestDto,
-  ): Promise<RefundRequestResponseDto> {
-    return this.refundRequestsService.approve(id, user.id!, dto);
+  ): Promise<AdminRefundRequestResponseDto> {
+    return this.refundRequestsService
+      .approve(id, user.id!, dto)
+      .then(RefundRequestMapper.toAdminResponse);
   }
 
   @Patch(':id/reject')
   @Permissions('refund.update')
   @ApiOperation({ summary: 'Admin: reject a refund request' })
   @ApiParam({ name: 'id', example: 'uuid-v4' })
-  @ApiOkResponse({ type: RefundRequestResponseDto })
+  @ApiOkResponse({ type: AdminRefundRequestResponseDto })
   reject(
     @CurrentUser() user: ICurrentUser,
     @Param('id') id: string,
     @Body() dto: RejectRefundRequestDto,
-  ): Promise<RefundRequestResponseDto> {
-    return this.refundRequestsService.reject(id, user.id!, dto);
+  ): Promise<AdminRefundRequestResponseDto> {
+    return this.refundRequestsService
+      .reject(id, user.id!, dto)
+      .then(RefundRequestMapper.toAdminResponse);
   }
 }

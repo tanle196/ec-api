@@ -69,7 +69,8 @@ export class ReviewsService {
 
     const qb = this.reviewRepo
       .createQueryBuilder('r')
-      .leftJoinAndSelect('r.user', 'u');
+      .leftJoin('r.user', 'u')
+      .addSelect(['u.id', 'u.fullName', 'u.avatar']);
 
     if (product_id) qb.andWhere('r.product_id = :product_id', { product_id });
     if (user_id) qb.andWhere('r.user_id = :user_id', { user_id });

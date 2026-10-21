@@ -4,6 +4,7 @@ import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { AdminBannersController } from './admin-banners.controller';
 import { BannersController } from './banners.controller';
 import { BannerPosition } from './enums/banner-position.enum';
+import { BannerMapper } from './mapper/banner.mapper';
 
 const permissionsOf = (method: string) =>
   Reflect.getMetadata(
@@ -24,6 +25,15 @@ describe('Banner controllers', () => {
     remove: jest.fn().mockResolvedValue(undefined),
   };
 
+  beforeAll(() => {
+    jest
+      .spyOn(BannerMapper, 'toResponse')
+      .mockImplementation((b) => ({ mapped: b }) as never);
+    jest
+      .spyOn(BannerMapper, 'toResponseList')
+      .mockImplementation((b) => ({ mappedList: b }) as never);
+  });
+
   beforeEach(() => jest.clearAllMocks());
 
   describe('BannersController (public)', () => {
@@ -36,8 +46,8 @@ describe('Banner controllers', () => {
     });
 
     it('lists active banners for a position', async () => {
-      await expect(controller.findActive(BannerPosition.HERO)).resolves.toBe(
-        'findActive',
+      await expect(controller.findActive(BannerPosition.HERO)).resolves.toEqual(
+        { mappedList: 'findActive' },
       );
       expect(bannersService.findActive).toHaveBeenCalledWith(
         BannerPosition.HERO,
@@ -76,9 +86,15 @@ describe('Banner controllers', () => {
     it('delegates CRUD endpoints', async () => {
       const dto = { title: 'Sale' };
 
-      await expect(controller.findAll()).resolves.toBe('findAll');
-      await expect(controller.create(dto as never)).resolves.toBe('create');
-      await expect(controller.update('b', dto)).resolves.toBe('update');
+      await expect(controller.findAll()).resolves.toEqual({
+        mappedList: 'findAll',
+      });
+      await expect(controller.create(dto as never)).resolves.toEqual({
+        mapped: 'create',
+      });
+      await expect(controller.update('b', dto)).resolves.toEqual({
+        mapped: 'update',
+      });
       await controller.reorder({ items: [] });
       await controller.remove('b');
 

@@ -27,6 +27,8 @@ import { UpdatePermissionDto } from './dto/update-permission.dto';
 import { PermissionMetaResponseDto } from './dto/permission-meta-response.dto';
 import { Permissions } from './decorators/permissions.decorator';
 import { PermissionsGuard } from './guards/permissions.guard';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { PermissionMapper } from './mapper/permission.mapper';
 
 @ApiTags('Admin: permissions')
 @Controller('admin/permissions')
@@ -40,7 +42,7 @@ export class AdminPermissionsController {
   @ApiOperation({ summary: 'Create a new permission' })
   @ApiResponse({ status: 201, type: Permission })
   create(@Body() dto: CreatePermissionDto) {
-    return this.service.create(dto);
+    return this.service.create(dto).then(PermissionMapper.toResponse);
   }
 
   @Get('meta')
@@ -60,7 +62,9 @@ export class AdminPermissionsController {
   @ApiOperation({ summary: 'List permissions (paginated)' })
   @ApiResponse({ status: 200, type: PermissionPaginatedResponseDto })
   findAll(@Query() query: PermissionListQueryDto) {
-    return this.service.findAll(query);
+    return this.service
+      .findAll(query)
+      .then((page) => mapPaginated(page, PermissionMapper.toResponse));
   }
 
   @Get('all')
@@ -72,7 +76,7 @@ export class AdminPermissionsController {
   })
   @ApiResponse({ status: 200, type: [Permission] })
   findAllRaw() {
-    return this.service.findAllRaw();
+    return this.service.findAllRaw().then(PermissionMapper.toResponseList);
   }
 
   @Get(':id')
@@ -81,7 +85,7 @@ export class AdminPermissionsController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiResponse({ status: 200, type: Permission })
   findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+    return this.service.findOne(id).then(PermissionMapper.toResponse);
   }
 
   @Put(':id')
@@ -90,7 +94,7 @@ export class AdminPermissionsController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiResponse({ status: 200, type: Permission })
   update(@Param('id') id: string, @Body() dto: UpdatePermissionDto) {
-    return this.service.update(id, dto);
+    return this.service.update(id, dto).then(PermissionMapper.toResponse);
   }
 
   @Delete(':id')

@@ -25,6 +25,7 @@ import { AddressesService } from './addresses.service';
 import { AddressResponseDto } from './dto/address-response.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
+import { AddressMapper } from './mapper/address.mapper';
 
 @ApiTags('addresses')
 @Controller('users/me/addresses')
@@ -37,7 +38,9 @@ export class AddressesController {
   @ApiOperation({ summary: 'List my addresses' })
   @ApiOkResponse({ type: [AddressResponseDto] })
   findAll(@CurrentUser() user: ICurrentUser): Promise<AddressResponseDto[]> {
-    return this.addressesService.findAllByUser(user.id!);
+    return this.addressesService
+      .findAllByUser(user.id!)
+      .then(AddressMapper.toResponseList);
   }
 
   @Post()
@@ -47,7 +50,9 @@ export class AddressesController {
     @CurrentUser() user: ICurrentUser,
     @Body() dto: CreateAddressDto,
   ): Promise<AddressResponseDto> {
-    return this.addressesService.create(user.id!, dto);
+    return this.addressesService
+      .create(user.id!, dto)
+      .then(AddressMapper.toResponse);
   }
 
   @Get(':id')
@@ -58,7 +63,9 @@ export class AddressesController {
     @CurrentUser() user: ICurrentUser,
     @Param('id') id: string,
   ): Promise<AddressResponseDto> {
-    return this.addressesService.findOne(id, user.id!);
+    return this.addressesService
+      .findOne(id, user.id!)
+      .then(AddressMapper.toResponse);
   }
 
   @Patch(':id')
@@ -70,7 +77,9 @@ export class AddressesController {
     @Param('id') id: string,
     @Body() dto: UpdateAddressDto,
   ): Promise<AddressResponseDto> {
-    return this.addressesService.update(id, user.id!, dto);
+    return this.addressesService
+      .update(id, user.id!, dto)
+      .then(AddressMapper.toResponse);
   }
 
   @Delete(':id')
@@ -93,6 +102,8 @@ export class AddressesController {
     @CurrentUser() user: ICurrentUser,
     @Param('id') id: string,
   ): Promise<AddressResponseDto> {
-    return this.addressesService.setDefault(id, user.id!);
+    return this.addressesService
+      .setDefault(id, user.id!)
+      .then(AddressMapper.toResponse);
   }
 }

@@ -11,13 +11,11 @@ import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CategoryListQueryDto } from './dto/category-list-query.dto';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
-import {
-  CategoryResponseDto,
-  CategoryTreeNodeDto,
-} from './dto/category-response.dto';
+import { CategoryTreeNodeDto } from './dto/category-response.dto';
 import { MediaService } from '@/media/media.service';
 import { generateUniqueSlug } from '@/common/utils/slug.util';
 import { CategoryPolicy } from './policies/category.policy';
+import { CategoryMapper } from './mapper/category.mapper';
 
 @Injectable()
 export class CategoriesService {
@@ -70,7 +68,7 @@ export class CategoriesService {
 
   async findAll(
     query: CategoryListQueryDto,
-  ): Promise<PaginatedResponseDto<CategoryResponseDto>> {
+  ): Promise<PaginatedResponseDto<Category>> {
     const { page = 1, limit = 20, name, parent_id, isActive } = query;
 
     const where: Record<string, unknown> = {};
@@ -217,9 +215,9 @@ export class CategoriesService {
       order: { sortOrder: 'ASC' },
     });
 
-    return {
-      ...category,
-      children: await Promise.all(children.map((c) => this.buildTreeNode(c))),
-    };
+    return CategoryMapper.toTreeNode(
+      category,
+      await Promise.all(children.map((c) => this.buildTreeNode(c))),
+    );
   }
 }

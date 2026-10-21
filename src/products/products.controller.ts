@@ -12,6 +12,8 @@ import {
   ProductResponseDto,
   TagResponseDto,
 } from './dto/product-response.dto';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { ProductMapper } from './mapper/product.mapper';
 
 @ApiTags('products')
 @Controller('products')
@@ -22,7 +24,9 @@ export class ProductsController {
   @ApiOperation({ summary: 'List products (paginated, filterable)' })
   @ApiOkResponse({ type: ProductPaginatedResponseDto })
   findAll(@Query() query: ProductListQueryDto) {
-    return this.productsService.findAll(query, { publishedOnly: true });
+    return this.productsService
+      .findAll(query, { publishedOnly: true })
+      .then((page) => mapPaginated(page, ProductMapper.toListItem));
   }
 
   @Get('slug/:slug')
@@ -32,7 +36,9 @@ export class ProductsController {
   @ApiParam({ name: 'slug', example: 'iphone-15-pro' })
   @ApiOkResponse({ type: ProductResponseDto })
   findBySlug(@Param('slug') slug: string) {
-    return this.productsService.findBySlug(slug, { publishedOnly: true });
+    return this.productsService
+      .findBySlug(slug, { publishedOnly: true })
+      .then(ProductMapper.toPublicResponse);
   }
 
   @Get(':id')
@@ -40,7 +46,9 @@ export class ProductsController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: ProductResponseDto })
   findOne(@Param('id') id: string) {
-    return this.productsService.findOne(id, { publishedOnly: true });
+    return this.productsService
+      .findOne(id, { publishedOnly: true })
+      .then(ProductMapper.toPublicResponse);
   }
 }
 
@@ -53,7 +61,7 @@ export class TagsController {
   @ApiOperation({ summary: 'List all tags' })
   @ApiOkResponse({ type: [TagResponseDto] })
   findAllTags(): Promise<TagResponseDto[]> {
-    return this.productsService.findAllTags();
+    return this.productsService.findAllTags().then(ProductMapper.toTagList);
   }
 
   @Get('slug/:slug')
@@ -61,6 +69,6 @@ export class TagsController {
   @ApiParam({ name: 'slug', example: 'sale' })
   @ApiOkResponse({ type: TagResponseDto })
   findTagBySlug(@Param('slug') slug: string): Promise<TagResponseDto> {
-    return this.productsService.findTagBySlug(slug);
+    return this.productsService.findTagBySlug(slug).then(ProductMapper.toTag);
   }
 }

@@ -21,7 +21,8 @@ describe('ReviewsService', () => {
 
   const buildService = () => {
     const reviewQb = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      leftJoin: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),
@@ -116,6 +117,19 @@ describe('ReviewsService', () => {
   });
 
   describe('findAll', () => {
+    it('joins only public author columns, never the email', async () => {
+      const { service, reviewQb } = buildService();
+
+      await service.findAll({});
+
+      expect(reviewQb.leftJoin).toHaveBeenCalledWith('r.user', 'u');
+      expect(reviewQb.addSelect).toHaveBeenCalledWith([
+        'u.id',
+        'u.fullName',
+        'u.avatar',
+      ]);
+    });
+
     it('applies every provided filter and paginates', async () => {
       const { service, reviewQb } = buildService();
 

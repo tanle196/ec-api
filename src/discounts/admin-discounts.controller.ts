@@ -31,6 +31,8 @@ import {
   AdminDiscountResponseDto,
 } from './dto/admin-discount-response.dto';
 import { DiscountsService } from './discounts.service';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { DiscountMapper } from './mapper/discount.mapper';
 
 @ApiTags('Admin: discounts')
 @Controller('admin/discounts')
@@ -44,7 +46,7 @@ export class AdminDiscountsController {
   @ApiOperation({ summary: 'Admin: create a discount code' })
   @ApiResponse({ status: 201, type: AdminDiscountResponseDto })
   create(@Body() dto: CreateDiscountDto): Promise<AdminDiscountResponseDto> {
-    return this.discountsService.create(dto);
+    return this.discountsService.create(dto).then(DiscountMapper.toResponse);
   }
 
   @Get()
@@ -54,7 +56,9 @@ export class AdminDiscountsController {
   findAll(
     @Query() query: DiscountListQueryDto,
   ): Promise<AdminDiscountPaginatedResponseDto> {
-    return this.discountsService.findAll(query);
+    return this.discountsService
+      .findAll(query)
+      .then((page) => mapPaginated(page, DiscountMapper.toResponse));
   }
 
   @Get(':id')
@@ -63,7 +67,7 @@ export class AdminDiscountsController {
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: AdminDiscountResponseDto })
   findOne(@Param('id') id: string): Promise<AdminDiscountResponseDto> {
-    return this.discountsService.findOne(id);
+    return this.discountsService.findOne(id).then(DiscountMapper.toResponse);
   }
 
   @Patch(':id')
@@ -75,7 +79,9 @@ export class AdminDiscountsController {
     @Param('id') id: string,
     @Body() dto: UpdateDiscountDto,
   ): Promise<AdminDiscountResponseDto> {
-    return this.discountsService.update(id, dto);
+    return this.discountsService
+      .update(id, dto)
+      .then(DiscountMapper.toResponse);
   }
 
   @Delete(':id')

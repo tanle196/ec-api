@@ -7,7 +7,18 @@ describe('RoleMapper', () => {
     description: 'Administrator',
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-02'),
-    permissions: [{ id: 'perm-1' }],
+    permissions: [
+      {
+        id: 'perm-1',
+        module: 'user',
+        action: 'read',
+        description: 'Read users',
+        isSystem: true,
+        createdAt: new Date('2026-01-01'),
+        updatedAt: new Date('2026-01-01'),
+        roles: [],
+      },
+    ],
     users: [],
   };
 
@@ -18,7 +29,24 @@ describe('RoleMapper', () => {
       description: 'Administrator',
       createdAt: role.createdAt,
       updatedAt: role.updatedAt,
+      permissions: [
+        {
+          id: 'perm-1',
+          module: 'user',
+          action: 'read',
+          description: 'Read users',
+          isSystem: true,
+          createdAt: role.permissions[0].createdAt,
+          updatedAt: role.permissions[0].updatedAt,
+        },
+      ],
     });
+  });
+
+  it('omits permissions when the relation was not loaded', () => {
+    expect(
+      RoleMapper.toResponse({ ...role, permissions: undefined } as never),
+    ).not.toHaveProperty('permissions');
   });
 
   it('maps a list of roles', () => {

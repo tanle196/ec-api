@@ -25,6 +25,8 @@ import {
   PaymentResponseDto,
 } from './dto/payment-response.dto';
 import { PaymentsService } from './payments.service';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { PaymentMapper } from './mapper/payment.mapper';
 
 @ApiTags('payments')
 @Controller('payments')
@@ -40,7 +42,9 @@ export class PaymentsController {
     @CurrentUser() user: ICurrentUser,
     @Body() dto: CreatePaymentDto,
   ): Promise<PaymentResponseDto> {
-    return this.paymentsService.create(user.id!, dto);
+    return this.paymentsService
+      .create(user.id!, dto)
+      .then(PaymentMapper.toResponse);
   }
 
   @Get('me')
@@ -50,7 +54,9 @@ export class PaymentsController {
     @CurrentUser() user: ICurrentUser,
     @Query() query: PaymentQueryDto,
   ): Promise<PaymentPaginatedResponseDto> {
-    return this.paymentsService.findAll(query, user.id, false);
+    return this.paymentsService
+      .findAll(query, user.id, false)
+      .then((page) => mapPaginated(page, PaymentMapper.toResponse));
   }
 
   @Get('me/:id')
@@ -61,6 +67,8 @@ export class PaymentsController {
     @CurrentUser() user: ICurrentUser,
     @Param('id') id: string,
   ): Promise<PaymentResponseDto> {
-    return this.paymentsService.findOne(id, user.id);
+    return this.paymentsService
+      .findOne(id, user.id)
+      .then(PaymentMapper.toResponse);
   }
 }
