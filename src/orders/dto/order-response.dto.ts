@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DiscountType } from '@/discounts/enums/discount-type.enum';
 import { OrderStatus } from '../enums/order-status.enum';
-import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { Paginated } from '@/common/dto/pagination.dto';
 
 export class AppliedDiscountDto {
   @ApiProperty() id!: string;
@@ -47,7 +47,4 @@ export class OrderListItemDto {
   @ApiProperty() createdAt!: Date;
 }
 
-export class OrderPaginatedResponseDto extends PaginatedResponseDto<OrderListItemDto> {
-  @ApiProperty({ type: [OrderListItemDto] })
-  declare data: OrderListItemDto[];
-}
+export class OrderPaginatedResponseDto extends Paginated(OrderListItemDto) {}

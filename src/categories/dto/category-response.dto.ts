@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { Paginated } from '@/common/dto/pagination.dto';
 
 export class CategoryResponseDto {
   @ApiProperty({ example: '123e4567-e89b-12d3-a456-426614174000' })
@@ -44,7 +44,6 @@ export class CategoryTreeNodeDto extends CategoryResponseDto {
   children?: CategoryTreeNodeDto[];
 }
 
-export class CategoryPaginatedResponseDto extends PaginatedResponseDto<CategoryResponseDto> {
-  @ApiProperty({ type: () => [CategoryResponseDto] })
-  data: CategoryResponseDto[] = [];
-}
+export class CategoryPaginatedResponseDto extends Paginated(
+  CategoryResponseDto,
+) {}

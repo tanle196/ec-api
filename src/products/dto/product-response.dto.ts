@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProductStatus } from '../enums/product-status.enum';
-import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { Paginated } from '@/common/dto/pagination.dto';
 
 export class ProductImageResponseDto {
   @ApiProperty() id!: string;
@@ -64,7 +64,6 @@ export class ProductListItemDto {
   @ApiProperty() updatedAt!: Date;
 }
 
-export class ProductPaginatedResponseDto extends PaginatedResponseDto<ProductListItemDto> {
-  @ApiProperty({ type: () => [ProductListItemDto] })
-  data: ProductListItemDto[] = [];
-}
+export class ProductPaginatedResponseDto extends Paginated(
+  ProductListItemDto,
+) {}

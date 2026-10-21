@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { Paginated } from '@/common/dto/pagination.dto';
 import { RefundRequestStatus } from '../enums/refund-request-status.enum';
 
 export class RefundRequestItemResponseDto {
@@ -26,7 +26,6 @@ export class RefundRequestResponseDto {
   @ApiProperty() createdAt!: Date;
 }
 
-export class RefundRequestPaginatedResponseDto extends PaginatedResponseDto<RefundRequestResponseDto> {
-  @ApiProperty({ type: [RefundRequestResponseDto] })
-  declare data: RefundRequestResponseDto[];
-}
+export class RefundRequestPaginatedResponseDto extends Paginated(
+  RefundRequestResponseDto,
+) {}

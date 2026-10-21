@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { Paginated } from '@/common/dto/pagination.dto';
 
 export class ReviewAuthorDto {
   @ApiProperty() id!: string;
@@ -21,6 +21,4 @@ export class ReviewResponseDto {
   @ApiProperty() updatedAt!: Date;
 }
 
-export class ReviewPaginatedResponseDto extends PaginatedResponseDto<ReviewResponseDto> {
-  @ApiProperty({ type: [ReviewResponseDto] }) declare data: ReviewResponseDto[];
-}
+export class ReviewPaginatedResponseDto extends Paginated(ReviewResponseDto) {}

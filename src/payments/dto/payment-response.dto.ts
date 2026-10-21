@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { Paginated } from '@/common/dto/pagination.dto';
 import { PaymentMethod } from '../enums/payment-method.enum';
 import { PaymentStatus } from '../enums/payment-status.enum';
 
@@ -16,7 +16,6 @@ export class PaymentResponseDto {
   @ApiProperty() updatedAt!: Date;
 }
 
-export class PaymentPaginatedResponseDto extends PaginatedResponseDto<PaymentResponseDto> {
-  @ApiProperty({ type: [PaymentResponseDto] })
-  declare data: PaymentResponseDto[];
-}
+export class PaymentPaginatedResponseDto extends Paginated(
+  PaymentResponseDto,
+) {}

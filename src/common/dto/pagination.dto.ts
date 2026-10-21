@@ -1,3 +1,4 @@
+import { Type } from '@nestjs/common';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type as TypeTranFormer } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
@@ -30,4 +31,13 @@ export class PaginatedResponseDto<T> {
 
   @ApiProperty({ example: 10 })
   limit!: number;
+}
+
+// Generic bị xoá lúc runtime nên Swagger cần class cụ thể để biết kiểu của `data`
+export function Paginated<T>(itemType: Type<T>) {
+  class PaginatedResponse extends PaginatedResponseDto<T> {
+    @ApiProperty({ type: () => [itemType] })
+    declare data: T[];
+  }
+  return PaginatedResponse;
 }

@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { Paginated } from '@/common/dto/pagination.dto';
 import { PermissionAction } from '../enums/permission-action.enum';
 
 export class PermissionResponseDto {
@@ -25,7 +25,6 @@ export class PermissionResponseDto {
   updatedAt!: Date;
 }
 
-export class PermissionPaginatedResponseDto extends PaginatedResponseDto<PermissionResponseDto> {
-  @ApiProperty({ type: () => [PermissionResponseDto] })
-  data: PermissionResponseDto[] = [];
-}
+export class PermissionPaginatedResponseDto extends Paginated(
+  PermissionResponseDto,
+) {}

@@ -1,4 +1,4 @@
-import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
+import { Paginated } from '@/common/dto/pagination.dto';
 import { RoleResponseDto } from '@/roles/dto/role-response.dto';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -40,8 +40,4 @@ export class UserResponseDto {
   updatedAt!: Date;
 }
 
-export class UserPaginatedResponseDto extends PaginatedResponseDto<UserResponseDto> {
-  // Thêm từ khóa declare để báo cho TS biết đây chỉ là khai báo đè kiểu, không sinh code JS
-  @ApiProperty({ type: () => [UserResponseDto] })
-  data: UserResponseDto[] = [];
-}
+export class UserPaginatedResponseDto extends Paginated(UserResponseDto) {}
