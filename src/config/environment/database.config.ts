@@ -2,6 +2,7 @@ import { ConfigType, registerAs } from '@nestjs/config';
 import { ConfigModules } from '../types/ConfigModules';
 
 const databaseConfig = registerAs(ConfigModules.Database, () => ({
+  url: process.env.DATABASE_URL || undefined,
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT) || 5432,
   user: process.env.DB_USERNAME,

@@ -12,6 +12,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
         return {
           type: 'postgres',
+          // url overrides host/port/username/password/database when set
+          url: dbConfig.url,
           host: dbConfig.host,
           port: dbConfig.port,
           username: dbConfig.user,

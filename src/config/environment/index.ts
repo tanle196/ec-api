@@ -8,6 +8,7 @@ import {
   IsString,
   MinLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 export enum NodeEnv {
@@ -35,18 +36,28 @@ export class EnvironmentVariables {
   @Min(1)
   PORT: number = 5432;
 
+  // When set, takes precedence over the individual DB_* variables
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  DATABASE_URL?: string;
+
+  @ValidateIf((env: EnvironmentVariables) => !env.DATABASE_URL)
   @IsString()
   DB_HOST!: string;
 
   @IsInt()
   DB_PORT: number = 5432;
 
+  @ValidateIf((env: EnvironmentVariables) => !env.DATABASE_URL)
   @IsString()
   DB_USERNAME!: string;
 
+  @ValidateIf((env: EnvironmentVariables) => !env.DATABASE_URL)
   @IsString()
   DB_PASSWORD!: string;
 
+  @ValidateIf((env: EnvironmentVariables) => !env.DATABASE_URL)
   @IsString()
   DB_NAME!: string;
 
