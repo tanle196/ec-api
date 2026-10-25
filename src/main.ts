@@ -58,7 +58,11 @@ async function bootstrap() {
     ...swaggerUiOptions,
     jsonDocumentUrl: 'docs/admin-json',
   });
-  const port = Number(process.env.PORT) || 10000;
+  const port = process.env.PORT ? Number(process.env.PORT) : 10000;
+
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid PORT: ${process.env.PORT}`);
+  }
 
   await app.listen(port, '0.0.0.0');
 
