@@ -67,4 +67,4 @@ workflows:
             - test-and-build
           filters:
             branches:
-              only: main
+              only: develop
