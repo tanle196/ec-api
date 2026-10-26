@@ -1,0 +1,186 @@
+table,column,type,constraints,description
+users,id,uuid,PK,ID người dùng
+users,email,varchar,UK NOT NULL,Email đăng nhập
+users,fullName,varchar,NULLABLE,Họ tên đầy đủ
+users,avatar,varchar,NULLABLE,URL ảnh đại diện
+users,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày tạo
+users,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+identities,id,uuid,PK,ID identity
+identities,user_id,uuid,FK(users.id) ON DELETE CASCADE,Người dùng sở hữu
+identities,providerUserId,varchar,NULLABLE,ID từ provider (Google/Facebook)
+identities,provider,enum(local/google/facebook/github),NOT NULL,Nhà cung cấp xác thực
+identities,passwordHash,varchar,NULLABLE,Hash mật khẩu (local only)
+identities,isActive,boolean,NOT NULL DEFAULT false,Trạng thái kích hoạt
+identities,accessToken,text,NULLABLE,Access token OAuth
+identities,refreshToken,text,NULLABLE,Refresh token OAuth
+identities,expiresAt,timestamptz,NULLABLE,Thời gian hết hạn token
+identities,verificationToken,text,NULLABLE,Token xác thực email
+identities,verificationTokenExpires,timestamp,NULLABLE,Hết hạn token xác thực
+identities,resetToken,text,NULLABLE,Token đặt lại mật khẩu
+identities,resetTokenExpires,timestamptz,NULLABLE,Hết hạn token reset
+identities,rawProfile,jsonb,NULLABLE,Dữ liệu profile thô từ OAuth
+identities,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày tạo
+identities,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+roles,id,uuid,PK,ID vai trò
+roles,name,varchar,UK NOT NULL,Tên vai trò (admin/user/staff...)
+roles,description,varchar,NULLABLE,Mô tả vai trò
+roles,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày tạo
+roles,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+permissions,id,uuid,PK,ID quyền
+permissions,module,varchar(50),NOT NULL,Module áp dụng (user/product/order...)
+permissions,action,enum(create/read/update/delete),NOT NULL,Hành động CRUD
+permissions,description,varchar,NOT NULL,Mô tả quyền
+permissions,isSystem,boolean,NOT NULL DEFAULT false,Quyền hệ thống (readonly)
+permissions,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày tạo
+permissions,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+user_role,user_id,uuid,FK(users.id) PK,Người dùng
+user_role,role_id,uuid,FK(roles.id) PK,Vai trò
+
+role_permission,role_id,uuid,FK(roles.id) PK,Vai trò
+role_permission,permission_id,uuid,FK(permissions.id) PK,Quyền
+
+user_permission,user_id,uuid,FK(users.id) PK,Người dùng
+user_permission,permission_id,uuid,FK(permissions.id) PK,Quyền trực tiếp
+
+categories,id,uuid,PK,ID danh mục
+categories,parent_id,uuid,FK(categories.id) NULLABLE,Danh mục cha (đệ quy)
+categories,name,varchar,NOT NULL,Tên danh mục
+categories,slug,varchar,UK NOT NULL,Slug SEO
+categories,description,text,NULLABLE,Mô tả danh mục
+categories,image,varchar,NULLABLE,URL ảnh danh mục
+categories,sortOrder,integer,NOT NULL DEFAULT 0,Thứ tự sắp xếp
+categories,isActive,boolean,NOT NULL DEFAULT true,Trạng thái hiển thị
+categories,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày tạo
+categories,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+products,id,uuid,PK,ID sản phẩm
+products,category_id,uuid,FK(categories.id) NOT NULL,Danh mục chứa
+products,name,varchar,NOT NULL,Tên sản phẩm
+products,slug,varchar,UK NOT NULL,Slug SEO
+products,description,text,NULLABLE,Mô tả chi tiết
+products,basePrice,decimal(12-2),NOT NULL,Giá gốc (hiển thị)
+products,sku,varchar,UK NOT NULL,Mã SKU sản phẩm
+products,status,enum(draft/published/archived),NOT NULL DEFAULT draft,Trạng thái sản phẩm
+products,isFeatured,boolean,NOT NULL DEFAULT false,Sản phẩm nổi bật
+products,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày tạo
+products,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+product_images,id,uuid,PK,ID ảnh
+product_images,product_id,uuid,FK(products.id) ON DELETE CASCADE,Sản phẩm
+product_images,url,varchar,NOT NULL,URL ảnh
+product_images,alt,varchar,NULLABLE,Alt text ảnh
+product_images,isPrimary,boolean,NOT NULL DEFAULT false,Ảnh đại diện sản phẩm
+product_images,sortOrder,integer,NOT NULL DEFAULT 0,Thứ tự ảnh
+
+product_variants,id,uuid,PK,ID biến thể
+product_variants,product_id,uuid,FK(products.id) ON DELETE CASCADE,Sản phẩm gốc
+product_variants,name,varchar,NOT NULL,Tên biến thể (VD: Đỏ - L)
+product_variants,sku,varchar,UK NOT NULL,Mã SKU biến thể
+product_variants,price,decimal(12-2),NOT NULL,Giá bán biến thể
+product_variants,stock,integer,NOT NULL DEFAULT 0,Số lượng tồn kho
+product_variants,attributes,jsonb,NULLABLE,"Thuộc tính {""color"":""red"",""size"":""L""}"
+product_variants,isActive,boolean,NOT NULL DEFAULT true,Trạng thái kinh doanh
+product_variants,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày tạo
+product_variants,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+tags,id,uuid,PK,ID tag
+tags,name,varchar,UK NOT NULL,Tên tag
+tags,slug,varchar,UK NOT NULL,Slug tag
+
+product_tag,product_id,uuid,FK(products.id) PK,Sản phẩm
+product_tag,tag_id,uuid,FK(tags.id) PK,Tag
+
+addresses,id,uuid,PK,ID địa chỉ
+addresses,user_id,uuid,FK(users.id) ON DELETE CASCADE,Người dùng
+addresses,fullName,varchar,NOT NULL,Tên người nhận
+addresses,phone,varchar,NOT NULL,Số điện thoại
+addresses,addressLine1,varchar,NOT NULL,Địa chỉ dòng 1
+addresses,addressLine2,varchar,NULLABLE,Địa chỉ dòng 2 (tùy chọn)
+addresses,city,varchar,NOT NULL,Thành phố
+addresses,province,varchar,NOT NULL,Tỉnh/Thành phố
+addresses,country,varchar,NOT NULL DEFAULT VN,Quốc gia
+addresses,postalCode,varchar,NULLABLE,Mã bưu chính
+addresses,isDefault,boolean,NOT NULL DEFAULT false,Địa chỉ mặc định
+addresses,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày tạo
+addresses,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+orders,id,uuid,PK,ID đơn hàng
+orders,user_id,uuid,FK(users.id) NOT NULL,Người đặt hàng
+orders,address_id,uuid,FK(addresses.id) NOT NULL,Địa chỉ giao hàng
+orders,orderNumber,varchar,UK NOT NULL,Mã đơn hàng (ORD-20260512-001)
+orders,status,enum(pending/confirmed/processing/shipped/delivered/cancelled/refunded),NOT NULL DEFAULT pending,Trạng thái đơn hàng
+orders,subtotal,decimal(12-2),NOT NULL,Tổng tiền hàng
+orders,shippingFee,decimal(12-2),NOT NULL DEFAULT 0,Phí vận chuyển
+orders,discount,decimal(12-2),NOT NULL DEFAULT 0,Số tiền giảm giá
+orders,total,decimal(12-2),NOT NULL,Tổng thanh toán
+orders,notes,text,NULLABLE,Ghi chú đơn hàng
+orders,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày đặt hàng
+orders,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+order_items,id,uuid,PK,ID dòng đơn hàng
+order_items,order_id,uuid,FK(orders.id) ON DELETE CASCADE,Đơn hàng
+order_items,variant_id,uuid,FK(product_variants.id) NOT NULL,Biến thể đã mua
+order_items,productName,varchar,NOT NULL,Tên sản phẩm (snapshot)
+order_items,variantName,varchar,NOT NULL,Tên biến thể (snapshot)
+order_items,unitPrice,decimal(12-2),NOT NULL,Đơn giá tại thời điểm mua
+order_items,quantity,integer,NOT NULL,Số lượng
+order_items,total,decimal(12-2),NOT NULL,Thành tiền
+
+payments,id,uuid,PK,ID thanh toán
+payments,order_id,uuid,FK(orders.id) NOT NULL,Đơn hàng
+payments,method,enum(cod/vnpay/momo/zalopay/stripe/bank_transfer),NOT NULL,Phương thức thanh toán
+payments,status,enum(pending/completed/failed/refunded),NOT NULL DEFAULT pending,Trạng thái thanh toán
+payments,amount,decimal(12-2),NOT NULL,Số tiền thanh toán
+payments,transactionId,varchar,NULLABLE,Mã giao dịch từ gateway
+payments,metadata,jsonb,NULLABLE,Dữ liệu trả về từ payment gateway
+payments,paidAt,timestamp,NULLABLE,Thời gian thanh toán thành công
+payments,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày tạo
+payments,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+carts,id,uuid,PK,ID giỏ hàng
+carts,user_id,uuid,FK(users.id) ON DELETE CASCADE UK,Người dùng (1 user 1 cart)
+carts,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày tạo
+carts,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+cart_items,id,uuid,PK,ID dòng giỏ hàng
+cart_items,cart_id,uuid,FK(carts.id) ON DELETE CASCADE,Giỏ hàng
+cart_items,variant_id,uuid,FK(product_variants.id) NOT NULL,Biến thể sản phẩm
+cart_items,quantity,integer,NOT NULL DEFAULT 1,Số lượng
+cart_items,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày thêm vào giỏ
+cart_items,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+reviews,id,uuid,PK,ID đánh giá
+reviews,user_id,uuid,FK(users.id) ON DELETE CASCADE,Người đánh giá
+reviews,product_id,uuid,FK(products.id) ON DELETE CASCADE,Sản phẩm được đánh giá
+reviews,rating,integer,NOT NULL CHECK(1-5),Số sao (1-5)
+reviews,title,varchar,NULLABLE,Tiêu đề đánh giá
+reviews,content,text,NULLABLE,Nội dung đánh giá
+reviews,isVerified,boolean,NOT NULL DEFAULT false,Đã mua hàng (verified purchase)
+reviews,isApproved,boolean,NOT NULL DEFAULT false,Đã duyệt hiển thị
+reviews,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày đánh giá
+reviews,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+wishlists,id,uuid,PK,ID wishlist
+wishlists,user_id,uuid,FK(users.id) ON DELETE CASCADE,Người dùng
+wishlists,product_id,uuid,FK(products.id) ON DELETE CASCADE,Sản phẩm yêu thích
+wishlists,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày thêm vào
+
+discounts,id,uuid,PK,ID mã giảm giá
+discounts,code,varchar,UK NOT NULL,Mã coupon (SALE20)
+discounts,type,enum(percent/fixed),NOT NULL,Loại giảm giá
+discounts,value,decimal(10-2),NOT NULL,Giá trị giảm (% hoặc VNĐ)
+discounts,minOrderValue,decimal(12-2),NULLABLE,Giá trị đơn hàng tối thiểu
+discounts,usageLimit,integer,NULLABLE,Giới hạn số lần dùng
+discounts,usedCount,integer,NOT NULL DEFAULT 0,Số lần đã dùng
+discounts,isActive,boolean,NOT NULL DEFAULT true,Trạng thái kích hoạt
+discounts,startsAt,timestamp,NULLABLE,Ngày bắt đầu hiệu lực
+discounts,expiresAt,timestamp,NULLABLE,Ngày hết hạn
+discounts,createdAt,timestamp,NOT NULL DEFAULT NOW(),Ngày tạo
+discounts,updatedAt,timestamp,NOT NULL DEFAULT NOW(),Ngày cập nhật
+
+order_discount,order_id,uuid,FK(orders.id) PK,Đơn hàng
+order_discount,discount_id,uuid,FK(discounts.id) PK,Mã giảm giá đã áp dụng

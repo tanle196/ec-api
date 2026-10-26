@@ -1,0 +1,122 @@
+// @/config/environment.ts
+import {
+  IsEmail,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MinLength,
+  Min,
+  ValidateIf,
+} from 'class-validator';
+
+export enum NodeEnv {
+  Local = 'local',
+  Staging = 'staging',
+  Production = 'production',
+}
+
+export class EnvironmentVariables {
+  @IsEnum(NodeEnv)
+  NODE_ENV: NodeEnv = NodeEnv.Local;
+
+  //APP
+  @IsString()
+  @IsNotEmpty()
+  APP_DOMAIN!: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  SHIPPING_FLAT_FEE: number = 0;
+
+  // Database
+  @IsInt()
+  @Min(1)
+  PORT: number = 5432;
+
+  // When set, takes precedence over the individual DB_* variables
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  DATABASE_URL?: string;
+
+  @ValidateIf((env: EnvironmentVariables) => !env.DATABASE_URL)
+  @IsString()
+  DB_HOST!: string;
+
+  @IsInt()
+  DB_PORT: number = 5432;
+
+  @ValidateIf((env: EnvironmentVariables) => !env.DATABASE_URL)
+  @IsString()
+  DB_USERNAME!: string;
+
+  @ValidateIf((env: EnvironmentVariables) => !env.DATABASE_URL)
+  @IsString()
+  DB_PASSWORD!: string;
+
+  @ValidateIf((env: EnvironmentVariables) => !env.DATABASE_URL)
+  @IsString()
+  DB_NAME!: string;
+
+  // JWT
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(32)
+  JWT_ACCESS_SECRET!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  JWT_ACCESS_EXPIRES_IN!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(32)
+  JWT_REFRESH_SECRET!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  JWT_REFRESH_EXPIRES_IN!: string;
+
+  //GOOGLE
+  @IsString()
+  GOOGLE_CLIENT_ID!: string;
+
+  @IsString()
+  GOOGLE_CLIENT_SECRET!: string;
+
+  @IsString()
+  GOOGLE_CALLBACK_URL!: string;
+
+  @IsEmail()
+  MAIL_USER!: string;
+
+  @IsString()
+  MAIL_PASS!: string;
+
+  @IsInt()
+  MAIL_PORT!: number;
+
+  // STRIPE
+  @IsString()
+  @IsNotEmpty()
+  STRIPE_SECRET_KEY!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  STRIPE_WEBHOOK_SECRET!: string;
+
+  @IsOptional()
+  @IsString()
+  STRIPE_CURRENCY: string = 'vnd';
+
+  @IsString()
+  @IsNotEmpty()
+  STRIPE_CHECKOUT_SUCCESS_URL!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  STRIPE_CHECKOUT_CANCEL_URL!: string;
+}

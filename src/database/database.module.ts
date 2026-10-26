@@ -1,0 +1,30 @@
+import { TypedConfigService } from '@/config/TypedConfigService';
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+
+@Module({
+  imports: [
+    TypeOrmModule.forRootAsync({
+      inject: [TypedConfigService],
+      useFactory: (typedConfigService: TypedConfigService) => {
+        const dbConfig = typedConfigService.getDatabaseConfig();
+        const isProduction = typedConfigService.isProduction();
+
+        return {
+          type: 'postgres',
+          // url overrides host/port/username/password/database when set
+          url: dbConfig.url,
+          host: dbConfig.host,
+          port: dbConfig.port,
+          username: dbConfig.user,
+          password: dbConfig.pass,
+          database: dbConfig.name,
+          autoLoadEntities: true,
+          synchronize: false,
+          logging: isProduction,
+        };
+      },
+    }),
+  ],
+})
+export class DatabaseModule {}

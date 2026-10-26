@@ -1,0 +1,19 @@
+# docker-compose.staging.yml
+services:
+
+  postgres:
+    image: postgres:17-alpine
+    env_file: .env.staging
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_staging:
+  node_modules:

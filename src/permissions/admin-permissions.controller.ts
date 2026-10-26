@@ -1,0 +1,108 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiParam,
+  ApiOkResponse,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
+import { CreatePermissionDto } from './dto/create-permission.dto';
+import { PermissionListQueryDto } from './dto/permission-list-query.dto';
+import { PermissionPaginatedResponseDto } from './dto/permission-response.dto';
+import { PermissionsService } from './permissions.service';
+import { Permission } from './entities/permission.entity';
+import { UpdatePermissionDto } from './dto/update-permission.dto';
+import { PermissionMetaResponseDto } from './dto/permission-meta-response.dto';
+import { Permissions } from './decorators/permissions.decorator';
+import { PermissionsGuard } from './guards/permissions.guard';
+import { mapPaginated } from '@/common/dto/pagination.dto';
+import { PermissionMapper } from './mapper/permission.mapper';
+
+@ApiTags('Admin: permissions')
+@Controller('admin/permissions')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@ApiBearerAuth('access-token')
+export class AdminPermissionsController {
+  constructor(private readonly service: PermissionsService) {}
+
+  @Post()
+  @Permissions('permission.create')
+  @ApiOperation({ summary: 'Create a new permission' })
+  @ApiResponse({ status: 201, type: Permission })
+  create(@Body() dto: CreatePermissionDto) {
+    return this.service.create(dto).then(PermissionMapper.toResponse);
+  }
+
+  @Get('meta')
+  @Permissions('permission.read')
+  @ApiOperation({
+    summary: 'Get permission metadata for frontend',
+    description:
+      'Used to render UI (module, system action, custom action). Not for auth.',
+  })
+  @ApiOkResponse({ type: PermissionMetaResponseDto })
+  getMeta() {
+    return this.service.getMeta();
+  }
+
+  @Get()
+  @Permissions('permission.read')
+  @ApiOperation({ summary: 'List permissions (paginated)' })
+  @ApiResponse({ status: 200, type: PermissionPaginatedResponseDto })
+  findAll(@Query() query: PermissionListQueryDto) {
+    return this.service
+      .findAll(query)
+      .then((page) => mapPaginated(page, PermissionMapper.toResponse));
+  }
+
+  @Get('all')
+  @Permissions('permission.read')
+  @ApiOperation({
+    summary: 'Get all permissions (no pagination)',
+    description:
+      'Returns the full permission list, e.g. for rendering a role/permission assignment UI.',
+  })
+  @ApiResponse({ status: 200, type: [Permission] })
+  findAllRaw() {
+    return this.service.findAllRaw().then(PermissionMapper.toResponseList);
+  }
+
+  @Get(':id')
+  @Permissions('permission.read')
+  @ApiOperation({ summary: 'Get permission by id' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiResponse({ status: 200, type: Permission })
+  findOne(@Param('id') id: string) {
+    return this.service.findOne(id).then(PermissionMapper.toResponse);
+  }
+
+  @Put(':id')
+  @Permissions('permission.update')
+  @ApiOperation({ summary: 'Update permission' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiResponse({ status: 200, type: Permission })
+  update(@Param('id') id: string, @Body() dto: UpdatePermissionDto) {
+    return this.service.update(id, dto).then(PermissionMapper.toResponse);
+  }
+
+  @Delete(':id')
+  @Permissions('permission.delete')
+  @ApiOperation({ summary: 'Delete permission' })
+  @ApiParam({ name: 'id', example: 'uuid-v4' })
+  @ApiResponse({ status: 200, description: 'Permission deleted' })
+  remove(@Param('id') id: string) {
+    return this.service.remove(id);
+  }
+}

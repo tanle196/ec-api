@@ -1,0 +1,23 @@
+import { Injectable } from '@nestjs/common';
+import { PassportStrategy } from '@nestjs/passport';
+import { Strategy } from 'passport-local';
+import { AuthService } from '../auth.service';
+import { UserInformationResponseDto } from '../dtos/user-response.dto';
+
+@Injectable()
+export class LocalStrategy extends PassportStrategy(Strategy) {
+  constructor(private authService: AuthService) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    super({
+      usernameField: 'email',
+      passwordField: 'password',
+    });
+  }
+
+  validate(
+    email: string,
+    password: string,
+  ): Promise<UserInformationResponseDto> {
+    return this.authService.validateLocalUser(email, password);
+  }
+}
