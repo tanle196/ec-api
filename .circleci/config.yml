@@ -1,0 +1,70 @@
+
+version: 2.1
+
+jobs:
+  test-and-build:
+    docker:
+      - image: cimg/node:22.23.4
+    steps:
+      - checkout
+
+      - run:
+          name: Enable pnpm
+          command: |
+            corepack enable
+            pnpm --version
+
+      - restore_cache:
+          keys:
+            - pnpm-v1-{{ checksum "pnpm-lock.yaml" }}
+            - pnpm-v1-
+
+      - run:
+          name: Install dependencies
+          command: pnpm install --frozen-lockfile
+
+      - save_cache:
+          key: pnpm-v1-{{ checksum "pnpm-lock.yaml" }}
+          paths:
+            - ~/.local/share/pnpm/store
+
+      - run:
+          name: Run tests
+          command: pnpm test -- --runInBand
+          when: on_success
+
+      - run:
+          name: Build NestJS
+          command: pnpm build
+
+      - persist_to_workspace:
+          root: .
+          paths:
+            - .
+
+  deploy-render:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - attach_workspace:
+          at: .
+      - run:
+          name: Trigger Render deployment
+          command: |
+            test -n "$RENDER_DEPLOY_HOOK_URL"
+            curl --fail --silent --show-error \
+              --retry 3 \
+              --retry-delay 2 \
+              --retry-connrefused \
+              "$RENDER_DEPLOY_HOOK_URL"
+
+workflows:
+  deploy-pipeline:
+    jobs:
+      - test-and-build
+      - deploy-render:
+          requires:
+            - test-and-build
+          filters:
+            branches:
+              only: main
