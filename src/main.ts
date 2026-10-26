@@ -9,7 +9,7 @@ import {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
-
+  app.enableCors();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   const whitelist = (process.env.APP_DOMAIN ?? 'http://localhost:5173')
