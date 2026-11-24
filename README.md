@@ -31,6 +31,39 @@
 $ npm install
 ```
 
+## Database: Docker, migrate, seed
+
+Requirements: Node 26 (`mise install`) and a running Docker daemon.
+
+1. Create `.env.local` from `.env.example`. To use the Docker Postgres, set
+   `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` and the matching `DB_*` variables.
+
+   > ⚠️ If `DATABASE_URL` is set, migrations and seeds run against that database
+   > (e.g. Supabase) instead of the Docker Postgres. Leave it empty when using Docker.
+
+2. First-time setup (start Postgres → run migrations → seed sample data):
+
+   ```bash
+   $ npm run db:setup
+   ```
+
+3. Run the app with the database:
+
+   ```bash
+   $ npm run db:local
+   ```
+
+| Script | Description |
+|---|---|
+| `npm run docker:up` | Start Postgres and wait until it is healthy |
+| `npm run docker:down` | Stop Postgres (data is kept) |
+| `npm run docker:logs` | Follow Postgres logs |
+| `npm run migration:run` | Run pending migrations |
+| `npm run migration:revert` | Revert the last migration |
+| `npm run seed` | Seed sample data (safe to re-run; existing records are skipped) |
+| `npm run db:setup` | `docker:up` + `migration:run` + `seed` |
+| `npm run db:local` | `docker:up` + `start:dev` |
+
 ## Compile and run the project
 
 ```bash
