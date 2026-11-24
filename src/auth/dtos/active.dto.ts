@@ -7,5 +7,5 @@ export class ActiveDto {
     description: 'Email verification token',
   })
   @IsString()
-  token: string;
+  token!: string;
 }

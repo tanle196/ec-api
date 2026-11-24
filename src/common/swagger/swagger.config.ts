@@ -59,8 +59,8 @@ export function authorizeFromTokenResponse(
       };
     }
   ).ui;
-  const body = res.body as
-    { accessToken?: unknown; refreshToken?: unknown } | undefined;
+  type TokenBody = { accessToken?: unknown; refreshToken?: unknown };
+  const body = res.body as TokenBody | undefined;
   if (!ui || !body) return res;
 
   if (typeof body.accessToken === 'string') {

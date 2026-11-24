@@ -5,7 +5,7 @@ import {
   GUARDS_METADATA,
   METHOD_METADATA,
 } from '@nestjs/common/constants';
-import { DECORATORS } from '@nestjs/swagger';
+import { DECORATORS } from '@nestjs/swagger/dist/constants';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
