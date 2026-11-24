@@ -9,7 +9,8 @@ export class WishlistProductDto {
   @ApiProperty() sku!: string;
   @ApiProperty({ enum: ProductStatus }) status!: ProductStatus;
   @ApiProperty() isFeatured!: boolean;
-  @ApiPropertyOptional({ nullable: true }) description!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  description!: string | null;
 }
 
 export class WishlistItemResponseDto {

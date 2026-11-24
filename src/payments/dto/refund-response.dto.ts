@@ -15,8 +15,10 @@ export class RefundResponseDto {
   @ApiProperty() amount!: number;
   @ApiProperty() reason!: string;
   @ApiProperty({ enum: RefundStatus }) status!: RefundStatus;
-  @ApiPropertyOptional() transactionId!: string | null;
-  @ApiPropertyOptional() actorId!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  transactionId!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  actorId!: string | null;
   @ApiProperty({ type: [RefundItemResponseDto] })
   items!: RefundItemResponseDto[];
   @ApiProperty() createdAt!: Date;

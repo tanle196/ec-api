@@ -3,8 +3,10 @@ import { Paginated } from '@/common/dto/pagination.dto';
 
 export class ReviewAuthorDto {
   @ApiProperty() id!: string;
-  @ApiPropertyOptional({ nullable: true }) fullName!: string | null;
-  @ApiPropertyOptional({ nullable: true }) avatar!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  fullName!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  avatar!: string | null;
 }
 
 export class ReviewResponseDto {
@@ -14,8 +16,10 @@ export class ReviewResponseDto {
   user!: ReviewAuthorDto | null;
   @ApiProperty() product_id!: string;
   @ApiProperty() rating!: number;
-  @ApiPropertyOptional({ nullable: true }) title!: string | null;
-  @ApiPropertyOptional({ nullable: true }) content!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  title!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  content!: string | null;
   @ApiProperty() isVerified!: boolean;
   @ApiProperty() isApproved!: boolean;
   @ApiProperty() createdAt!: Date;

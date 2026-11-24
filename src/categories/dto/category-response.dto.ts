@@ -5,7 +5,7 @@ export class CategoryResponseDto {
   @ApiProperty({ example: '123e4567-e89b-12d3-a456-426614174000' })
   id!: string;
 
-  @ApiPropertyOptional({ example: null, nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true, example: null })
   parent_id!: string | null;
 
   @ApiProperty({ example: 'Smartphones' })
@@ -15,14 +15,16 @@ export class CategoryResponseDto {
   slug!: string;
 
   @ApiPropertyOptional({
-    example: 'All smartphones and mobile phones',
+    type: String,
     nullable: true,
+    example: 'All smartphones and mobile phones',
   })
   description!: string | null;
 
   @ApiPropertyOptional({
-    example: 'https://cdn.example.com/cat.jpg',
+    type: String,
     nullable: true,
+    example: 'https://cdn.example.com/cat.jpg',
   })
   image!: string | null;
 

@@ -17,9 +17,12 @@ export class RefundRequestResponseDto {
   @ApiProperty() amount!: number;
   @ApiProperty() reason!: string;
   @ApiProperty({ enum: RefundRequestStatus }) status!: RefundRequestStatus;
-  @ApiPropertyOptional() adminNote!: string | null;
-  @ApiPropertyOptional() reviewedAt!: Date | null;
-  @ApiPropertyOptional() refund_id!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  adminNote!: string | null;
+  @ApiPropertyOptional({ type: Date, nullable: true })
+  reviewedAt!: Date | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  refund_id!: string | null;
   @ApiProperty({ type: [RefundRequestItemResponseDto] })
   items!: RefundRequestItemResponseDto[];
   @ApiProperty() createdAt!: Date;

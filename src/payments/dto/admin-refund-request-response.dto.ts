@@ -3,7 +3,8 @@ import { Paginated } from '@/common/dto/pagination.dto';
 import { RefundRequestResponseDto } from './refund-request-response.dto';
 
 export class AdminRefundRequestResponseDto extends RefundRequestResponseDto {
-  @ApiPropertyOptional() reviewedBy!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  reviewedBy!: string | null;
 }
 
 export class AdminRefundRequestPaginatedResponseDto extends Paginated(

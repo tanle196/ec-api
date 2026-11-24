@@ -5,11 +5,13 @@ export class AddressResponseDto {
   @ApiProperty() fullName!: string;
   @ApiProperty() phone!: string;
   @ApiProperty() addressLine1!: string;
-  @ApiPropertyOptional() addressLine2!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  addressLine2!: string | null;
   @ApiProperty() city!: string;
   @ApiProperty() province!: string;
   @ApiProperty() country!: string;
-  @ApiPropertyOptional() postalCode!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  postalCode!: string | null;
   @ApiProperty() isDefault!: boolean;
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;

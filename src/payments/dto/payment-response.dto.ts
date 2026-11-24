@@ -9,8 +9,10 @@ export class PaymentBaseResponseDto {
   @ApiProperty({ enum: PaymentMethod }) method!: PaymentMethod;
   @ApiProperty({ enum: PaymentStatus }) status!: PaymentStatus;
   @ApiProperty() amount!: number;
-  @ApiPropertyOptional() transactionId!: string | null;
-  @ApiPropertyOptional() paidAt!: Date | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  transactionId!: string | null;
+  @ApiPropertyOptional({ type: Date, nullable: true })
+  paidAt!: Date | null;
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;
 }
@@ -19,7 +21,8 @@ export class PaymentBaseResponseDto {
 // the full provider payload (e.g. a Stripe Checkout Session), which is not
 // meant for the client — only the redirect URL is.
 export class PaymentMetadataDto {
-  @ApiPropertyOptional({ nullable: true }) checkoutUrl!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  checkoutUrl!: string | null;
 }
 
 export class PaymentResponseDto extends PaymentBaseResponseDto {

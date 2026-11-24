@@ -10,7 +10,9 @@ export class OrderStatusHistoryResponseDto {
   @ApiProperty({ enum: OrderStatus }) toStatus!: OrderStatus;
   @ApiProperty({ enum: OrderStatusChangeActor })
   changedByType!: OrderStatusChangeActor;
-  @ApiPropertyOptional() changedById!: string | null;
-  @ApiPropertyOptional() note!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  changedById!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  note!: string | null;
   @ApiProperty() createdAt!: Date;
 }

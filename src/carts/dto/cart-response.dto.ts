@@ -6,7 +6,12 @@ export class CartItemVariantDto {
   @ApiProperty() sku!: string;
   @ApiProperty() price!: number;
   @ApiProperty() stock!: number;
-  @ApiPropertyOptional() attributes!: Record<string, unknown> | null;
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: true,
+    nullable: true,
+  })
+  attributes!: Record<string, unknown> | null;
 }
 
 export class CartItemResponseDto {

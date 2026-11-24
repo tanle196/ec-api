@@ -13,9 +13,11 @@ export class AppliedDiscountDto {
 export class OrderItemResponseDto {
   @ApiProperty() id!: string;
   @ApiProperty() order_id!: string;
-  @ApiPropertyOptional() variant_id!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  variant_id!: string | null;
   @ApiProperty() productName!: string;
-  @ApiPropertyOptional() variantName!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  variantName!: string | null;
   @ApiProperty() unitPrice!: number;
   @ApiProperty() quantity!: number;
   @ApiProperty() total!: number;
@@ -24,14 +26,16 @@ export class OrderItemResponseDto {
 export class OrderResponseDto {
   @ApiProperty() id!: string;
   @ApiProperty() user_id!: string;
-  @ApiPropertyOptional() address_id!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  address_id!: string | null;
   @ApiProperty() orderNumber!: string;
   @ApiProperty({ enum: OrderStatus }) status!: OrderStatus;
   @ApiProperty() subtotal!: number;
   @ApiProperty() shippingFee!: number;
   @ApiProperty() discount!: number;
   @ApiProperty() total!: number;
-  @ApiPropertyOptional() notes!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  notes!: string | null;
   @ApiProperty({ type: [OrderItemResponseDto] }) items!: OrderItemResponseDto[];
   @ApiProperty({ type: [AppliedDiscountDto] }) discounts!: AppliedDiscountDto[];
   @ApiProperty() createdAt!: Date;

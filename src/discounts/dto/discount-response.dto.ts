@@ -7,12 +7,16 @@ export class DiscountResponseDto {
   @ApiProperty() code!: string;
   @ApiProperty({ enum: DiscountType }) type!: DiscountType;
   @ApiProperty() value!: number;
-  @ApiPropertyOptional() minOrderValue!: number | null;
-  @ApiPropertyOptional() usageLimit!: number | null;
+  @ApiPropertyOptional({ type: Number, nullable: true })
+  minOrderValue!: number | null;
+  @ApiPropertyOptional({ type: Number, nullable: true })
+  usageLimit!: number | null;
   @ApiProperty() usedCount!: number;
   @ApiProperty() isActive!: boolean;
-  @ApiPropertyOptional() startsAt!: Date | null;
-  @ApiPropertyOptional() expiresAt!: Date | null;
+  @ApiPropertyOptional({ type: Date, nullable: true })
+  startsAt!: Date | null;
+  @ApiPropertyOptional({ type: Date, nullable: true })
+  expiresAt!: Date | null;
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;
 }

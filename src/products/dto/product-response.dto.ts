@@ -4,9 +4,11 @@ import { Paginated } from '@/common/dto/pagination.dto';
 
 export class ProductImageResponseDto {
   @ApiProperty() id!: string;
-  @ApiPropertyOptional({ nullable: true }) variant_id!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  variant_id!: string | null;
   @ApiProperty() url!: string;
-  @ApiPropertyOptional({ nullable: true }) alt!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  alt!: string | null;
   @ApiProperty() isPrimary!: boolean;
   @ApiProperty() sortOrder!: number;
 }
@@ -17,10 +19,12 @@ export class ProductVariantResponseDto {
   @ApiProperty() sku!: string;
   @ApiProperty() price!: number;
   @ApiProperty() stock!: number;
-  @ApiPropertyOptional({ nullable: true }) attributes!: Record<
-    string,
-    unknown
-  > | null;
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: true,
+    nullable: true,
+  })
+  attributes!: Record<string, unknown> | null;
   @ApiProperty() isActive!: boolean;
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;
@@ -37,7 +41,8 @@ export class ProductResponseDto {
   @ApiProperty() category_id!: string;
   @ApiProperty() name!: string;
   @ApiProperty() slug!: string;
-  @ApiPropertyOptional({ nullable: true }) description!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  description!: string | null;
   @ApiProperty() basePrice!: number;
   @ApiProperty() sku!: string;
   @ApiProperty({ enum: ProductStatus }) status!: ProductStatus;
