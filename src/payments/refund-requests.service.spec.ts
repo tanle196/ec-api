@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { PaymentPolicy } from './policies/payment.policy';
 import { RefundRequestPolicy } from './policies/refund-request.policy';
 import { RefundRequestsService } from './refund-requests.service';
@@ -160,10 +161,20 @@ describe('RefundRequestsService', () => {
       manager.findOne.mockResolvedValueOnce(pendingRequest());
       paymentsService.createRefund.mockResolvedValueOnce({ id: 'refund-1' });
       refundRequestRepo.save.mockRejectedValueOnce(new Error('db blip'));
+      // The error log is expected here — silence it and assert on it instead.
+      const loggerError = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
 
       await expect(service.approve('rr-1', 'admin-1', {})).rejects.toThrow(
         'db blip',
       );
+
+      expect(loggerError).toHaveBeenCalledWith(
+        expect.stringContaining('failed to persist the refund_id link'),
+        expect.any(String),
+      );
+      loggerError.mockRestore();
 
       expect(refundRequestRepo.save).toHaveBeenCalledTimes(1);
       expect(refundRequestRepo.save).toHaveBeenCalledWith(
