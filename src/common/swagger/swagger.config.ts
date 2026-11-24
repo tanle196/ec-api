@@ -60,8 +60,7 @@ export function authorizeFromTokenResponse(
     }
   ).ui;
   const body = res.body as
-    | { accessToken?: unknown; refreshToken?: unknown }
-    | undefined;
+    { accessToken?: unknown; refreshToken?: unknown } | undefined;
   if (!ui || !body) return res;
 
   if (typeof body.accessToken === 'string') {
