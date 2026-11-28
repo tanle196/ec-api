@@ -1,4 +1,6 @@
 import { DataSource } from 'typeorm';
+import { InventoryMovement } from '@/inventory/entities/inventory-movement.entity';
+import { InventoryMovementReason } from '@/inventory/enums/inventory-movement-reason.enum';
 import { Category } from '@/categories/entities/category.entity';
 import { Tag } from '@/products/entities/tag.entity';
 import { Product } from '@/products/entities/product.entity';
@@ -222,6 +224,7 @@ export async function seedProducts(dataSource: DataSource): Promise<void> {
   const productRepo = dataSource.getRepository(Product);
   const imageRepo = dataSource.getRepository(ProductImage);
   const variantRepo = dataSource.getRepository(ProductVariant);
+  const movementRepo = dataSource.getRepository(InventoryMovement);
 
   // Seed tags
   console.log('  Seeding tags...');
@@ -286,10 +289,24 @@ export async function seedProducts(dataSource: DataSource): Promise<void> {
     }
 
     if (data.variants?.length) {
-      await variantRepo.save(
+      const variants = await variantRepo.save(
         data.variants.map((v) =>
           variantRepo.create({ ...v, product_id: product.id }),
         ),
+      );
+      // Opening ledger entries, so the inventory audit balances.
+      await movementRepo.insert(
+        variants
+          .filter((v) => v.stock > 0)
+          .map((v) => ({
+            variant_id: v.id,
+            sku: v.sku,
+            reason: InventoryMovementReason.INITIAL_STOCK,
+            onHandDelta: v.stock,
+            reservedDelta: 0,
+            refType: 'seed',
+            refId: v.id,
+          })),
       );
     }
 

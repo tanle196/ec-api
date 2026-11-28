@@ -3,7 +3,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
@@ -20,6 +19,7 @@ import { Discount } from '@/discounts/entities/discount.entity';
 import { DiscountsService } from '@/discounts/discounts.service';
 import { CartsService } from '@/carts/carts.service';
 import { CartItem } from '@/carts/entities/cart-item.entity';
+import { InventoryService, StockLine } from '@/inventory/inventory.service';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { MONEY_DECIMAL_PLACES, toMoney } from '@/common/utils/money.util';
 import { TypedConfigService } from '@/config/TypedConfigService';
@@ -86,6 +86,7 @@ export class OrdersService {
     private readonly mailService: MailService,
     private readonly usersService: UsersService,
     private readonly orderPolicy: OrderPolicy,
+    private readonly inventoryService: InventoryService,
   ) {}
 
   async create(userId: string, dto: CreateOrderDto): Promise<Order> {
@@ -99,8 +100,7 @@ export class OrdersService {
     });
     if (!address) throw new NotFoundException('Address not found');
 
-    const { subtotal, resolvedItems, variantMap } =
-      await this.resolveOrderItems(dto.items);
+    const { subtotal, resolvedItems } = await this.resolveOrderItems(dto.items);
 
     const discount = await this.resolveDiscount(
       dto.discountCode,
@@ -119,7 +119,6 @@ export class OrdersService {
         userId,
         addressId: dto.address_id,
         resolvedItems,
-        variantMap,
         subtotal,
         shippingFee,
         pricing,
@@ -151,8 +150,7 @@ export class OrdersService {
       quantity: item.quantity,
     }));
 
-    const { subtotal, resolvedItems, variantMap } =
-      await this.resolveOrderItems(items);
+    const { subtotal, resolvedItems } = await this.resolveOrderItems(items);
     const discount = await this.resolveDiscount(
       dto.discountCode,
       subtotal,
@@ -170,7 +168,6 @@ export class OrdersService {
         userId,
         addressId: dto.address_id,
         resolvedItems,
-        variantMap,
         subtotal,
         shippingFee,
         pricing,
@@ -319,7 +316,6 @@ export class OrdersService {
       userId: string;
       addressId: string;
       resolvedItems: ResolvedOrderItem[];
-      variantMap: Map<string, ProductVariant>;
       subtotal: number;
       shippingFee: number;
       pricing: OrderPricing;
@@ -327,17 +323,6 @@ export class OrdersService {
       cartId?: string;
     },
   ): Promise<Order> {
-    // Sort by variant_id before locking so concurrent orders that share
-    // variants always acquire row locks in the same order, avoiding a
-    // classic lock-order deadlock (order A locks X then waits on Y while
-    // order B locks Y then waits on X).
-    const itemsToLock = [...params.resolvedItems].sort((a, b) =>
-      a.variant_id.localeCompare(b.variant_id),
-    );
-    for (const item of itemsToLock) {
-      await this.decrementStock(manager, item, params.variantMap);
-    }
-
     const { shippingFee, pricing } = params;
     const total = toMoney(
       new Big(params.subtotal).plus(shippingFee).minus(pricing.discountTotal),
@@ -362,6 +347,13 @@ export class OrdersService {
         params.resolvedItems,
         pricing.lines,
       ),
+    );
+
+    // Rolls the whole order back with a 422 if any line can't be held.
+    await this.inventoryService.reserve(
+      manager,
+      this.stockLines(params.resolvedItems),
+      { refType: 'order', refId: savedOrder.id, actorId: params.userId },
     );
 
     for (const { discount, amount } of pricing.applied) {
@@ -491,24 +483,33 @@ export class OrdersService {
     }
 
     return this.dataSource.transaction(async (manager) => {
+      // Re-checked under the row lock: a concurrent cancel/confirm could have
+      // moved the order on since the read above, and releasing its stock
+      // again here would double-count it.
+      const locked = await manager.findOne(Order, {
+        where: { id: order.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!locked) throw new NotFoundException('Order not found');
+      this.orderPolicy.assertEditable(locked);
+
       if (dto.items) {
-        // Release stock held by the current items before re-resolving and
-        // decrementing for the new set, so quantity decreases free up stock
-        // and increases are checked against availability atomically.
-        await this.restoreStock(order, manager);
+        // Release the current hold before reserving the new set, so quantity
+        // decreases free up stock and increases are checked against what is
+        // actually available.
+        await this.releaseStock(manager, order, {
+          actorId: userId,
+          note: 'Order edited',
+        });
 
-        const { subtotal, resolvedItems, variantMap } =
-          await this.resolveOrderItems(dto.items);
-
-        // Sort by variant_id before locking so concurrent orders that share
-        // variants always acquire row locks in the same order, avoiding a
-        // lock-order deadlock (see persistOrder for details).
-        const itemsToLock = [...resolvedItems].sort((a, b) =>
-          a.variant_id.localeCompare(b.variant_id),
+        const { subtotal, resolvedItems } = await this.resolveOrderItems(
+          dto.items,
         );
-        for (const item of itemsToLock) {
-          await this.decrementStock(manager, item, variantMap);
-        }
+        await this.inventoryService.reserve(
+          manager,
+          this.stockLines(resolvedItems),
+          { refType: 'order', refId: order.id, actorId: userId },
+        );
 
         for (const discount of order.discounts) {
           this.orderPolicy.assertStillMeetsDiscountMinimum(discount, subtotal);
@@ -594,7 +595,10 @@ export class OrdersService {
 
         const fromStatus = order.status;
 
-        await this.restoreStock(order, manager);
+        await this.releaseStock(manager, order, {
+          actorId: userId,
+          note: 'Cancelled by customer',
+        });
         await this.discountsService.releaseForOrder(manager, order.id);
 
         order.status = OrderStatus.CANCELLED;
@@ -616,6 +620,82 @@ export class OrdersService {
     void this.notifyOrderStatusUpdate(updated, fromStatus);
 
     return updated;
+  }
+
+  /**
+   * Ids of unpaid orders past the hold window. Only a pre-filter: each one
+   * is re-checked under its row lock by `expireUnpaid`.
+   */
+  async findExpiredUnpaidOrderIds(
+    cutoff: Date,
+    limit = 100,
+  ): Promise<string[]> {
+    const rows = await this.orderRepo
+      .createQueryBuilder('o')
+      .select('o.id', 'id')
+      .where('o.status = :status', { status: OrderStatus.PENDING })
+      .andWhere('o.createdAt < :cutoff', { cutoff })
+      .andWhere(
+        `NOT EXISTS (
+          SELECT 1 FROM "payments" p
+          WHERE p."order_id" = o."id"
+            AND (p."method" IN (:...offline) OR p."status" IN (:...paid))
+        )`,
+        {
+          offline: OrderPolicy.OFFLINE_PAYMENT_METHODS,
+          paid: OrderPolicy.PAID_PAYMENT_STATUSES,
+        },
+      )
+      .orderBy('o.createdAt', 'ASC')
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+    return rows.map((r) => r.id);
+  }
+
+  /**
+   * Cancels one unpaid order whose hold expired, releasing its stock and
+   * discount uses. Locks the order and re-checks every condition first, so
+   * a payment confirmed (or a staff action) in the meantime wins and this
+   * becomes a no-op. Safe to run from several instances at once. Returns
+   * whether the order was expired.
+   */
+  async expireUnpaid(orderId: string, cutoff: Date): Promise<boolean> {
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { id: orderId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!order) return null;
+
+      const payments = await manager.find(Payment, {
+        where: { order_id: orderId },
+      });
+      if (!this.orderPolicy.isExpired(order, payments, cutoff)) return null;
+
+      const fromStatus = order.status;
+      const note = 'Expired: not paid within the hold window';
+      await this.releaseStock(manager, order, { note });
+      await this.discountsService.releaseForOrder(manager, order.id);
+
+      order.status = OrderStatus.CANCELLED;
+      await manager.save(Order, order);
+      await this.recordStatusChange(manager, {
+        orderId: order.id,
+        fromStatus,
+        toStatus: OrderStatus.CANCELLED,
+        actorType: OrderStatusChangeActor.SYSTEM,
+        note,
+      });
+
+      return {
+        updated: await this.findOrderOrThrow(manager, order.id),
+        fromStatus,
+      };
+    });
+
+    if (!result) return false;
+    void this.notifyOrderStatusUpdate(result.updated, result.fromStatus);
+    return true;
   }
 
   async updateStatus(
@@ -643,8 +723,15 @@ export class OrdersService {
           // would restore stock while the customer's money is never
           // returned. Paid orders must go through the refund flow instead.
           await this.assertNotPaid(manager, order.id);
-          await this.restoreStock(order, manager);
+          await this.releaseStock(manager, order, {
+            actorId: actor.actorId,
+            note: dto.note ?? 'Cancelled by staff',
+          });
           await this.discountsService.releaseForOrder(manager, order.id);
+        }
+
+        if (dto.status === OrderStatus.SHIPPED) {
+          await this.shipStock(manager, order, actor.actorId);
         }
 
         order.status = dto.status;
@@ -801,42 +888,6 @@ export class OrdersService {
     );
   }
 
-  // Atomic conditional decrement: only succeeds if enough stock remains AND
-  // the variant is still active, preventing oversell and closing the race
-  // where a variant is deactivated after `resolveOrderItems` read it but
-  // before this transaction commits.
-  private async decrementStock(
-    manager: EntityManager,
-    item: ResolvedOrderItem,
-    variantMap: Map<string, ProductVariant>,
-  ): Promise<void> {
-    const updateResult = await manager
-      .createQueryBuilder()
-      .update(ProductVariant)
-      .set({ stock: () => 'stock - :qty' })
-      .where('id = :id AND stock >= :qty AND "isActive" = true', {
-        id: item.variant_id,
-        qty: item.quantity,
-      })
-      .execute();
-
-    if (updateResult.affected === 0) {
-      const sku = variantMap.get(item.variant_id)?.sku ?? item.variant_id;
-      const current = await manager.findOne(ProductVariant, {
-        where: { id: item.variant_id },
-      });
-
-      if (current && !current.isActive) {
-        throw new UnprocessableEntityException(
-          `Variant ${sku} is no longer available`,
-        );
-      }
-      throw new UnprocessableEntityException(
-        `Insufficient stock for variant ${sku}`,
-      );
-    }
-  }
-
   private async assertNotPaid(
     manager: EntityManager,
     orderId: string,
@@ -854,23 +905,60 @@ export class OrdersService {
     }
   }
 
-  private async restoreStock(
-    order: Order,
+  private stockLines(
+    items: { variant_id: string | null; quantity: number }[],
+  ): StockLine[] {
+    return items
+      .filter((item): item is { variant_id: string; quantity: number } =>
+        Boolean(item.variant_id),
+      )
+      .map((item) => ({ variantId: item.variant_id, quantity: item.quantity }));
+  }
+
+  private async loadItems(
     manager: EntityManager,
-  ): Promise<void> {
-    const items = order.items?.length
+    order: Order,
+  ): Promise<OrderItem[]> {
+    return order.items?.length
       ? order.items
-      : await manager.find(OrderItem, { where: { order_id: order.id } });
+      : manager.find(OrderItem, { where: { order_id: order.id } });
+  }
+
+  // Gives the order's held stock back (cancel, or before re-reserving on
+  // edit). Lines whose variant was deleted are skipped.
+  private async releaseStock(
+    manager: EntityManager,
+    order: Order,
+    ref: { actorId?: string | null; note?: string },
+  ): Promise<void> {
+    const items = await this.loadItems(manager, order);
+    await this.inventoryService.release(manager, this.stockLines(items), {
+      refType: 'order',
+      refId: order.id,
+      actorId: ref.actorId ?? null,
+      note: ref.note ?? null,
+    });
+  }
+
+  // The order left the warehouse: consume its reservation and snapshot each
+  // line's unit cost for margin reporting.
+  private async shipStock(
+    manager: EntityManager,
+    order: Order,
+    actorId?: string,
+  ): Promise<void> {
+    const items = await this.loadItems(manager, order);
+    const costs = await this.inventoryService.ship(
+      manager,
+      this.stockLines(items),
+      { refType: 'order', refId: order.id, actorId: actorId ?? null },
+    );
 
     for (const item of items) {
-      if (item.variant_id) {
-        await manager.increment(
-          ProductVariant,
-          { id: item.variant_id },
-          'stock',
-          item.quantity,
-        );
-      }
+      if (!item.variant_id) continue;
+      await manager.update(OrderItem, item.id, {
+        unitCost: costs.get(item.variant_id) ?? null,
+      });
     }
   }
 

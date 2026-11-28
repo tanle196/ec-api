@@ -1,4 +1,8 @@
 import { DataSource } from 'typeorm';
+import { InventoryMovement } from '@/inventory/entities/inventory-movement.entity';
+import { InventoryMovementReason } from '@/inventory/enums/inventory-movement-reason.enum';
+import { allocateProportionally } from '@/common/utils/allocation.util';
+import { allocateOrderLines } from '@/orders/pricing/order-pricing';
 import { Address } from '@/addresses/entities/address.entity';
 import { ProductVariant } from '@/products/entities/product-variant.entity';
 import { User } from '@/users/entities/user.entity';
@@ -93,12 +97,19 @@ function generateOrderNumber(daysAgo: number): string {
   return `ORD-${datePart}-${random}`;
 }
 
+const RESERVING_STATUSES = [
+  OrderStatus.PENDING,
+  OrderStatus.CONFIRMED,
+  OrderStatus.PROCESSING,
+];
+
 export async function seedOrders(dataSource: DataSource): Promise<void> {
   const userRepo = dataSource.getRepository(User);
   const addressRepo = dataSource.getRepository(Address);
   const variantRepo = dataSource.getRepository(ProductVariant);
   const orderRepo = dataSource.getRepository(Order);
   const itemRepo = dataSource.getRepository(OrderItem);
+  const movementRepo = dataSource.getRepository(InventoryMovement);
 
   for (const data of ORDERS) {
     const user = await userRepo.findOne({ where: { email: data.userEmail } });
@@ -175,11 +186,44 @@ export async function seedOrders(dataSource: DataSource): Promise<void> {
 
     const savedOrder = await orderRepo.save(order);
 
+    // Same per-line split the order flow stores. The seeded discount is
+    // whole-order, so it is spread by line total like the shipping fee.
+    const totals = itemsToSave.map((i) => i.total as number);
+    const lineDiscounts = allocateProportionally(discount, totals);
+    const lines = allocateOrderLines(totals, lineDiscounts, shippingFee);
+
     await itemRepo.save(
-      itemsToSave.map((item) =>
-        itemRepo.create({ ...item, order_id: savedOrder.id }),
+      itemsToSave.map((item, i) =>
+        itemRepo.create({ ...item, ...lines[i], order_id: savedOrder.id }),
       ),
     );
+
+    // Unshipped orders hold their stock, as they would if placed for real.
+    if (RESERVING_STATUSES.includes(data.status)) {
+      for (const item of itemsToSave) {
+        await variantRepo.decrement(
+          { id: item.variant_id! },
+          'stock',
+          item.quantity!,
+        );
+        await variantRepo.increment(
+          { id: item.variant_id! },
+          'reserved',
+          item.quantity!,
+        );
+        await movementRepo.insert({
+          variant_id: item.variant_id!,
+          sku: data.items.find(
+            (d) => variantMap.get(d.variantSku)?.id === item.variant_id,
+          )!.variantSku,
+          reason: InventoryMovementReason.ORDER_RESERVE,
+          onHandDelta: 0,
+          reservedDelta: item.quantity!,
+          refType: 'order',
+          refId: savedOrder.id,
+        });
+      }
+    }
 
     const itemSummary = data.items
       .map((i) => `${i.variantSku} x${i.quantity}`)

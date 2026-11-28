@@ -19,7 +19,7 @@
 - Updating/removing an item only succeeds if the `itemId` belongs to a cart item owned by the current user's cart (`NotFoundException` otherwise) — this enforces per-user isolation without an explicit ownership check on the variant.
 - Quantity must be an integer `>= 1` for both add and update operations (enforced by `class-validator` on the DTOs).
 - Clearing a cart deletes all cart items for that user's cart but keeps the cart row itself.
-- Stock is validated at cart-mutation time only; it is **not** re-locked/reserved, so stock could change between cart update and checkout (no optimistic locking observed in this module).
+- Stock (`variant.stock`, i.e. available units) is validated at cart-mutation time only; a cart does **not** reserve stock. Stock is reserved when the order is placed (see [inventory.md](inventory.md)), so it can change between cart update and checkout.
 
 ---
 

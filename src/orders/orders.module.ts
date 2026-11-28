@@ -5,6 +5,7 @@ import { ProductVariant } from '@/products/entities/product-variant.entity';
 import { Discount } from '@/discounts/entities/discount.entity';
 import { DiscountsModule } from '@/discounts/discounts.module';
 import { CartsModule } from '@/carts/carts.module';
+import { InventoryModule } from '@/inventory/inventory.module';
 import { MailModule } from '@/mail/mail.module';
 import { UsersModule } from '@/users/users.module';
 // Only the Payment entity is imported here (not PaymentsModule) — cancel()
@@ -18,6 +19,7 @@ import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrdersController } from './orders.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 import { OrdersService } from './orders.service';
+import { OrderExpiryScheduler } from './order-expiry.scheduler';
 import { OrderPolicy } from './policies/order.policy';
 
 @Module({
@@ -33,11 +35,12 @@ import { OrderPolicy } from './policies/order.policy';
     ]),
     DiscountsModule,
     CartsModule,
+    InventoryModule,
     MailModule,
     UsersModule,
   ],
   controllers: [OrdersController, AdminOrdersController],
-  providers: [OrdersService, OrderPolicy],
+  providers: [OrdersService, OrderPolicy, OrderExpiryScheduler],
   exports: [OrdersService],
 })
 export class OrdersModule {}

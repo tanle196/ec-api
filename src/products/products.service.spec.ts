@@ -64,6 +64,32 @@ describe('ProductsService', () => {
         .mockResolvedValue({ url: 'https://cdn/x.png', publicId: 'p/x' }),
       delete: jest.fn().mockResolvedValue(undefined),
     };
+    // Fake transactional manager: rows "saved" get an id; the locked
+    // variant is whatever the test puts in `lockedVariant`.
+    const txState: { lockedVariant: Record<string, unknown> | null } = {
+      lockedVariant: null,
+    };
+    const manager = {
+      create: jest.fn((_e: unknown, d: object) => ({ ...d })),
+      save: jest.fn((_e: unknown, d: unknown) =>
+        Promise.resolve(
+          Array.isArray(d)
+            ? d.map((row: object, i) => ({ id: `variant-${i + 1}`, ...row }))
+            : { id: 'variant-1', ...(d as object) },
+        ),
+      ),
+      findOne: jest.fn(() => Promise.resolve(txState.lockedVariant)),
+      findOneOrFail: jest.fn(() => Promise.resolve(txState.lockedVariant)),
+    };
+    const dataSource = {
+      transaction: jest.fn((cb: (m: typeof manager) => Promise<unknown>) =>
+        cb(manager),
+      ),
+    };
+    const inventoryService = {
+      recordInitialStock: jest.fn().mockResolvedValue(undefined),
+      setAvailable: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new ProductsService(
       productRepo as never,
       imageRepo as never,
@@ -71,10 +97,15 @@ describe('ProductsService', () => {
       tagRepo as never,
       mediaService as never,
       new ProductPolicy(),
+      inventoryService as never,
+      dataSource as never,
     );
     jest.spyOn(service['logger'], 'warn').mockImplementation(() => undefined);
     return {
       service,
+      manager,
+      txState,
+      inventoryService,
       productRepo,
       imageRepo,
       variantRepo,
@@ -149,9 +180,14 @@ describe('ProductsService', () => {
       expect(ctx.imageRepo.save).toHaveBeenCalledWith([
         { url: 'https://img', product_id: 'product-1' },
       ]);
-      expect(ctx.variantRepo.save).toHaveBeenCalledWith([
+      expect(ctx.manager.save).toHaveBeenCalledWith(expect.anything(), [
         { sku: 'V-1', name: 'M', price: 100, product_id: 'product-1' },
       ]);
+      // Opening ledger entries for the new variants, same transaction.
+      expect(ctx.inventoryService.recordInitialStock).toHaveBeenCalledWith(
+        ctx.manager,
+        [expect.objectContaining({ id: 'variant-1', sku: 'V-1' })],
+      );
     });
 
     it('rejects a duplicate explicit slug', async () => {
@@ -576,16 +612,25 @@ describe('ProductsService', () => {
   });
 
   describe('variants', () => {
-    it('addVariant links the variant to the product', async () => {
-      const { service, productRepo, variantRepo } = buildService();
+    it('addVariant links the variant to the product and records its stock', async () => {
+      const { service, productRepo, manager, inventoryService } =
+        buildService();
       productRepo.findOne.mockResolvedValue(product);
 
-      await service.addVariant('product-1', { sku: 'V-1' } as never);
-
-      expect(variantRepo.save).toHaveBeenCalledWith({
+      await service.addVariant('product-1', {
         sku: 'V-1',
+        stock: 7,
+      } as never);
+
+      expect(manager.save).toHaveBeenCalledWith(expect.anything(), {
+        sku: 'V-1',
+        stock: 7,
         product_id: 'product-1',
       });
+      expect(inventoryService.recordInitialStock).toHaveBeenCalledWith(
+        manager,
+        [expect.objectContaining({ id: 'variant-1', stock: 7 })],
+      );
     });
 
     it('addVariant rejects a duplicate SKU', async () => {
@@ -598,20 +643,50 @@ describe('ProductsService', () => {
       ).rejects.toThrow(ConflictException);
     });
 
-    it('updateVariant updates a variant of the product', async () => {
-      const { service, variantRepo } = buildService();
-      variantRepo.findOne.mockResolvedValueOnce({
-        id: 'v-1',
-        sku: 'V-1',
-        stock: 1,
-      });
+    it('updateVariant records a stock change as a ledger adjustment, never a direct write', async () => {
+      const { service, variantRepo, manager, txState, inventoryService } =
+        buildService();
+      const row = { id: 'v-1', sku: 'V-1', stock: 1 };
+      variantRepo.findOne.mockResolvedValueOnce(row);
+      txState.lockedVariant = row;
 
-      await expect(
-        service.updateVariant('product-1', 'v-1', { stock: 5 }),
-      ).resolves.toEqual({ id: 'v-1', sku: 'V-1', stock: 5 });
+      await service.updateVariant('product-1', 'v-1', { stock: 5 });
+
       expect(variantRepo.findOne).toHaveBeenCalledWith({
         where: { id: 'v-1', product_id: 'product-1' },
       });
+      expect(manager.findOne).toHaveBeenCalledWith(expect.anything(), {
+        where: { id: 'v-1' },
+        lock: { mode: 'pessimistic_write' },
+      });
+      expect(inventoryService.setAvailable).toHaveBeenCalledWith(
+        manager,
+        row,
+        5,
+        null,
+      );
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('updateVariant saves other fields before adjusting stock', async () => {
+      const { service, variantRepo, manager, txState, inventoryService } =
+        buildService();
+      const row = { id: 'v-1', sku: 'V-1', stock: 1, price: 10 };
+      variantRepo.findOne.mockResolvedValueOnce(row);
+      txState.lockedVariant = row;
+
+      await service.updateVariant('product-1', 'v-1', {
+        price: 12,
+        stock: 4,
+      });
+
+      expect(manager.save).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ price: 12, stock: 1 }),
+      );
+      expect(manager.save.mock.invocationCallOrder[0]).toBeLessThan(
+        inventoryService.setAvailable.mock.invocationCallOrder[0],
+      );
     });
 
     it('updateVariant checks a changed SKU', async () => {

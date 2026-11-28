@@ -31,6 +31,11 @@ export class EnvironmentVariables {
   @Min(0)
   SHIPPING_FLAT_FEE: number = 0;
 
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  PENDING_ORDER_TTL_MINUTES: number = 30;
+
   // Database
   @IsInt()
   @Min(1)

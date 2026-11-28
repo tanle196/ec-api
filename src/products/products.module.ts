@@ -10,6 +10,7 @@ import {
   AdminTagsController,
 } from './admin-products.controller';
 import { ProductsService } from './products.service';
+import { InventoryModule } from '@/inventory/inventory.module';
 import { MediaModule } from '@/media/media.module';
 import { ProductPolicy } from './policies/product.policy';
 
@@ -17,6 +18,7 @@ import { ProductPolicy } from './policies/product.policy';
   imports: [
     TypeOrmModule.forFeature([Product, ProductImage, ProductVariant, Tag]),
     MediaModule,
+    InventoryModule,
   ],
   controllers: [
     ProductsController,

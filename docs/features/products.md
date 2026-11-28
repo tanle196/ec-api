@@ -18,7 +18,7 @@
 - Setting `isPrimary: true` on a product image (via `addImage` or `uploadImage`) unsets `isPrimary` on all other images of that product first (only one primary image per product).
 - Product `status` defaults to `draft` (enum: `draft`, `published`, `archived`); `isFeatured` defaults to `false`.
 - Product `basePrice` and variant `price` must be `>= 0` (`@Min(0)`, max 2 decimal places).
-- Variant `stock` defaults to `0`, must be `>= 0`; variant `isActive` defaults to `true`.
+- Variant `stock` (units available to sell) defaults to `0`, must be `>= 0`; variant `isActive` defaults to `true`. `stock` is never written directly: creating a variant records its stock as an `initial_stock` ledger entry, and setting `stock` on update records the difference as an `adjustment` (see [inventory.md](inventory.md)). Optional `lowStockThreshold` flags the variant on the low-stock report.
 - Removing a product image also attempts to delete the underlying asset from the storage/cloud provider via `MediaService.delete`; a failure to delete the cloud asset is logged as a warning but does not block removal of the DB record.
 - File uploads for product images are validated by `MediaService` against `maxFileSizeBytes` and `allowedMimeTypes` from config before upload.
 - Deleting a product (`remove`) cascades to its images and variants at the DB/ORM level (`cascade: true` on `images`/`variants` relations, `onDelete: 'CASCADE'` on the FK side).

@@ -11,7 +11,9 @@
 
 - An order can only be created against an address that belongs to the requesting user (`address_id` + `user_id` lookup); otherwise `404 Address not found`.
 - Order items reference `ProductVariant`s; a variant must exist (`404`) and be active (`isActive`, else `422 Variant ... is inactive`).
-- Stock is decremented atomically per item using a conditional `UPDATE ... WHERE stock >= qty`; if the affected row count is 0, the order fails with `422 Insufficient stock for variant <sku>` (prevents overselling under concurrency).
+- Placing an order **reserves** its stock through `InventoryService.reserve` (see [inventory.md](inventory.md)): a conditional `UPDATE ... WHERE stock >= qty` moves units from `stock` (available) to `reserved`; if it fails the order rolls back with `422 Insufficient stock for variant <sku>` (prevents overselling under concurrency).
+- Moving an order to `shipped` consumes its reservation (`InventoryService.ship`) and snapshots each line's `unitCost` from the variant's average cost.
+- **Expiry**: a `PENDING` order older than `PENDING_ORDER_TTL_MINUTES` (default 30, `0` disables) that has no payment by an offline method (`cod`, `bank_transfer`) and no completed/refunded payment is cancelled by the system every minute (`OrderExpiryScheduler` → `OrdersService.expireUnpaid`), releasing its stock and discount uses. Each order is re-checked under its row lock, so a payment confirmed meanwhile wins.
 - `checkout` requires a non-empty cart (`400 Cart is empty`) and, on success, deletes the user's cart items.
 - Discount codes are optional; when present, resolved/validated via `DiscountsService.resolveCode` and its usage counter incremented.
 - New orders always start in `OrderStatus.PENDING`, with `total = subtotal + shippingFee - discount` (shippingFee from app config).
@@ -22,7 +24,7 @@
   - Editing items replaces the entire item list: stock for old items is restored first, then stock for new items is decremented (same conditional-update/oversell protection as creation).
   - If the order has applied discounts, the new subtotal is re-validated against each discount's `minOrderValue`; if it no longer qualifies, `400 Order no longer meets the minimum value for discount code "<code>"`.
   - Address can be changed only to another address owned by the same user (`404` otherwise).
-- **Cancellation** (`PATCH /orders/me/:id/cancel`) is only allowed when status is `PENDING` or `CONFIRMED`; otherwise `400 Cannot cancel order with status "<status>"`. Cancelling restores stock for all items.
+- **Cancellation** (`PATCH /orders/me/:id/cancel`) is only allowed when status is `PENDING` or `CONFIRMED`; otherwise `400 Cannot cancel order with status "<status>"`. Cancelling releases the order's reserved stock for all items.
 - **Admin status transitions** (`PATCH /admin/orders/:id/status`) follow a strict forward-only state machine (`ALLOWED_TRANSITIONS`); any transition not explicitly listed is rejected with `400 Cannot transition order from "<from>" to "<to>"`:
   - `pending` → `confirmed`, `cancelled`
   - `confirmed` → `processing`, `cancelled`
@@ -31,7 +33,7 @@
   - `delivered` → `refunded`
   - `partially_refunded` → `refunded`
   - `cancelled`, `refunded` are terminal (no further transitions)
-  - Transitioning to `cancelled` restores stock.
+  - Transitioning to `cancelled` releases reserved stock; transitioning to `shipped` consumes it.
 - Order status can also change as a side effect of payment events (`OrdersService.applyStatusChange`, used only by the payments module): payment completed → order `confirmed`; payment/refund fully refunded → order `refunded`; item-level partial refund → order `partially_refunded`.
 - Non-admin users can only see/act on their own orders (`ForbiddenException` if `order.user_id !== userId` in `findOne`).
 - **Refund eligibility** (payments module, item-level, tied to orders):

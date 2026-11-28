@@ -5,6 +5,9 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { Discount } from '@/discounts/entities/discount.entity';
+import { Payment } from '@/payments/entities/payment.entity';
+import { PaymentMethod } from '@/payments/enums/payment-method.enum';
+import { PaymentStatus } from '@/payments/enums/payment-status.enum';
 import { ProductVariant } from '@/products/entities/product-variant.entity';
 import { Order } from '../entities/order.entity';
 import { OrderStatus } from '../enums/order-status.enum';
@@ -14,6 +17,41 @@ import { OrderStatus } from '../enums/order-status.enum';
 // be placed, edited, cancelled or moved to another status.
 @Injectable()
 export class OrderPolicy {
+  // Settled offline (cash on delivery, or a transfer staff check by hand):
+  // orders paying this way wait for staff instead of expiring.
+  static readonly OFFLINE_PAYMENT_METHODS: PaymentMethod[] = [
+    PaymentMethod.COD,
+    PaymentMethod.BANK_TRANSFER,
+  ];
+
+  // Money has been taken; the order must go through the refund flow.
+  static readonly PAID_PAYMENT_STATUSES: PaymentStatus[] = [
+    PaymentStatus.COMPLETED,
+    PaymentStatus.PARTIALLY_REFUNDED,
+    PaymentStatus.REFUNDED,
+  ];
+
+  /**
+   * Whether an unpaid order has held its stock long enough and should be
+   * cancelled automatically: still PENDING, placed before `cutoff`, not
+   * paid, and not waiting on an offline payment method. An order with no
+   * payment at all (the customer never got to the payment step) expires
+   * too.
+   */
+  isExpired(
+    order: Pick<Order, 'status' | 'createdAt'>,
+    payments: Pick<Payment, 'method' | 'status'>[],
+    cutoff: Date,
+  ): boolean {
+    if (order.status !== OrderStatus.PENDING) return false;
+    if (order.createdAt >= cutoff) return false;
+    return !payments.some(
+      (p) =>
+        OrderPolicy.OFFLINE_PAYMENT_METHODS.includes(p.method) ||
+        OrderPolicy.PAID_PAYMENT_STATUSES.includes(p.status),
+    );
+  }
+
   private static readonly CANCELLABLE_STATUSES: OrderStatus[] = [
     OrderStatus.PENDING,
     OrderStatus.CONFIRMED,

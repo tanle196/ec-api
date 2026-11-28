@@ -42,13 +42,6 @@ describe('OrdersService', () => {
       variant: null,
     };
 
-    const stockQb = {
-      update: jest.fn().mockReturnThis(),
-      set: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      execute: jest.fn().mockResolvedValue({ affected: 1 }),
-    };
-
     const manager = {
       findOne: jest.fn((entity: unknown) => {
         if (entity === Order) return Promise.resolve(state.order);
@@ -69,8 +62,6 @@ describe('OrdersService', () => {
       query: jest.fn().mockResolvedValue(undefined),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
-      increment: jest.fn().mockResolvedValue(undefined),
-      createQueryBuilder: jest.fn().mockReturnValue(stockQb),
       transaction: jest.fn(),
     };
     manager.transaction.mockImplementation(
@@ -119,6 +110,11 @@ describe('OrdersService', () => {
     const usersService = {
       findById: jest.fn().mockResolvedValue({ email: 'a@example.com' }),
     };
+    const inventoryService = {
+      reserve: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
+      ship: jest.fn().mockResolvedValue(new Map()),
+    };
 
     const service = new OrdersService(
       orderRepo as never,
@@ -133,6 +129,7 @@ describe('OrdersService', () => {
       mailService as never,
       usersService as never,
       new OrderPolicy(),
+      inventoryService as never,
     );
     jest.spyOn(service['logger'], 'warn').mockImplementation(() => undefined);
     jest.spyOn(service['logger'], 'error').mockImplementation(() => undefined);
@@ -141,7 +138,8 @@ describe('OrdersService', () => {
       service,
       state,
       manager,
-      stockQb,
+      inventoryService,
+      orderRepo,
       listQb,
       addressRepo,
       variantRepo,
@@ -218,22 +216,19 @@ describe('OrdersService', () => {
       );
     });
 
-    it('decrements stock atomically, guarded by stock and isActive', async () => {
+    it('reserves stock for the order lines in the same transaction', async () => {
       const ctx = buildService();
 
       await ctx.service.create('user-1', dto);
 
-      expect(ctx.stockQb.where).toHaveBeenCalledWith(
-        'id = :id AND stock >= :qty AND "isActive" = true',
-        { id: 'variant-a', qty: 3 },
+      expect(ctx.inventoryService.reserve).toHaveBeenCalledWith(
+        ctx.manager,
+        [{ variantId: 'variant-a', quantity: 3 }],
+        { refType: 'order', refId: 'order-1', actorId: 'user-1' },
       );
-      const { stock } = (ctx.stockQb.set.mock.calls as unknown[][])[0][0] as {
-        stock: () => string;
-      };
-      expect(stock()).toBe('stock - :qty');
     });
 
-    it('locks variants in a deterministic (sorted) order', async () => {
+    it('reserves every line of a multi-line order', async () => {
       const ctx = buildService();
       ctx.variantRepo.find.mockResolvedValue([
         variant({ id: 'variant-z', sku: 'Z' }),
@@ -244,13 +239,19 @@ describe('OrdersService', () => {
         address_id: 'address-1',
         items: [
           { variant_id: 'variant-z', quantity: 1 },
-          { variant_id: 'variant-a', quantity: 1 },
+          { variant_id: 'variant-a', quantity: 2 },
         ],
       });
 
-      expect(
-        ctx.stockQb.where.mock.calls.map(([, p]) => (p as { id: string }).id),
-      ).toEqual(['variant-a', 'variant-z']);
+      // Lock ordering is InventoryService's job; the order passes all lines.
+      expect(ctx.inventoryService.reserve).toHaveBeenCalledWith(
+        ctx.manager,
+        [
+          { variantId: 'variant-z', quantity: 1 },
+          { variantId: 'variant-a', quantity: 2 },
+        ],
+        expect.anything(),
+      );
     });
 
     it('applies a discount code and records its usage', async () => {
@@ -391,26 +392,19 @@ describe('OrdersService', () => {
       expect(ctx.dataSource.transaction).not.toHaveBeenCalled();
     });
 
-    it('reports insufficient stock when the conditional decrement fails', async () => {
+    it('fails the order when stock cannot be reserved and sends no email', async () => {
       const ctx = buildService();
-      ctx.stockQb.execute.mockResolvedValue({ affected: 0 });
-      ctx.state.variant = { isActive: true };
-
-      await expect(ctx.service.create('user-1', dto)).rejects.toThrow(
+      ctx.inventoryService.reserve.mockRejectedValue(
         new UnprocessableEntityException(
           'Insufficient stock for variant SKU-A',
         ),
       );
-    });
-
-    it('reports a variant deactivated mid-checkout', async () => {
-      const ctx = buildService();
-      ctx.stockQb.execute.mockResolvedValue({ affected: 0 });
-      ctx.state.variant = { isActive: false };
 
       await expect(ctx.service.create('user-1', dto)).rejects.toThrow(
-        'Variant SKU-A is no longer available',
+        'Insufficient stock for variant SKU-A',
       );
+      await flush();
+      expect(ctx.mailService.sendOrderConfirmation).not.toHaveBeenCalled();
     });
 
     describe('order number collisions', () => {
@@ -651,6 +645,24 @@ describe('OrdersService', () => {
       ).rejects.toThrow('Cannot edit an order with status "confirmed"');
     });
 
+    it('re-checks the status under the row lock before touching stock', async () => {
+      const ctx = buildService();
+      // Pending when first read, confirmed by the time the lock is taken.
+      ctx.manager.findOne
+        .mockResolvedValueOnce(pendingOrder())
+        .mockResolvedValueOnce({
+          ...pendingOrder(),
+          status: OrderStatus.CONFIRMED,
+        });
+
+      await expect(
+        ctx.service.update('order-1', 'user-1', {
+          items: [{ variant_id: 'variant-a', quantity: 2 }],
+        }),
+      ).rejects.toThrow('Cannot edit an order with status "confirmed"');
+      expect(ctx.inventoryService.release).not.toHaveBeenCalled();
+    });
+
     it('updates notes and address without touching items or stock', async () => {
       const ctx = buildService();
       ctx.state.order = pendingOrder();
@@ -663,7 +675,8 @@ describe('OrdersService', () => {
       expect(ctx.addressRepo.findOne).toHaveBeenCalledWith({
         where: { id: 'address-2', user_id: 'user-1' },
       });
-      expect(ctx.manager.increment).not.toHaveBeenCalled();
+      expect(ctx.inventoryService.release).not.toHaveBeenCalled();
+      expect(ctx.inventoryService.reserve).not.toHaveBeenCalled();
       expect(ctx.manager.update).toHaveBeenCalledWith(Order, 'order-1', {
         address_id: 'address-2',
         notes: 'leave at door',
@@ -691,16 +704,20 @@ describe('OrdersService', () => {
         items: [{ variant_id: 'variant-a', quantity: 2 }],
       });
 
-      expect(ctx.manager.increment).toHaveBeenCalledWith(
-        ProductVariant,
-        { id: 'variant-a' },
-        'stock',
-        1,
+      expect(ctx.inventoryService.release).toHaveBeenCalledWith(
+        ctx.manager,
+        [{ variantId: 'variant-a', quantity: 1 }],
+        expect.objectContaining({ refType: 'order', refId: 'order-1' }),
       );
-      expect(ctx.stockQb.where).toHaveBeenCalledWith(expect.any(String), {
-        id: 'variant-a',
-        qty: 2,
-      });
+      expect(ctx.inventoryService.reserve).toHaveBeenCalledWith(
+        ctx.manager,
+        [{ variantId: 'variant-a', quantity: 2 }],
+        { refType: 'order', refId: 'order-1', actorId: 'user-1' },
+      );
+      // The old hold is given back before the new one is taken.
+      expect(
+        ctx.inventoryService.release.mock.invocationCallOrder[0],
+      ).toBeLessThan(ctx.inventoryService.reserve.mock.invocationCallOrder[0]);
       expect(ctx.manager.delete).toHaveBeenCalledWith(OrderItem, {
         order_id: 'order-1',
       });
@@ -781,11 +798,15 @@ describe('OrdersService', () => {
           where: { id: 'order-1' },
           lock: { mode: 'pessimistic_write' },
         });
-        expect(ctx.manager.increment).toHaveBeenCalledWith(
-          ProductVariant,
-          { id: 'variant-a' },
-          'stock',
-          2,
+        expect(ctx.inventoryService.release).toHaveBeenCalledWith(
+          ctx.manager,
+          [{ variantId: 'variant-a', quantity: 2 }],
+          {
+            refType: 'order',
+            refId: 'order-1',
+            actorId: 'user-1',
+            note: 'Cancelled by customer',
+          },
         );
         expect(ctx.discountsService.releaseForOrder).toHaveBeenCalledWith(
           ctx.manager,
@@ -819,7 +840,7 @@ describe('OrdersService', () => {
       await expect(ctx.service.cancel('order-1', 'user-1')).rejects.toThrow(
         /already been paid/,
       );
-      expect(ctx.manager.increment).not.toHaveBeenCalled();
+      expect(ctx.inventoryService.release).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -866,7 +887,12 @@ describe('OrdersService', () => {
       expect(ctx.manager.find).toHaveBeenCalledWith(OrderItem, {
         where: { order_id: 'order-1' },
       });
-      expect(ctx.manager.increment).toHaveBeenCalledTimes(1);
+      // Lines whose variant was deleted are skipped.
+      expect(ctx.inventoryService.release).toHaveBeenCalledWith(
+        ctx.manager,
+        [{ variantId: 'variant-a', quantity: 1 }],
+        expect.anything(),
+      );
     });
   });
 
@@ -901,7 +927,58 @@ describe('OrdersService', () => {
           note: 'ok',
         }),
       );
-      expect(ctx.manager.increment).not.toHaveBeenCalled();
+      expect(ctx.inventoryService.release).not.toHaveBeenCalled();
+    });
+
+    it('consumes the reservation and snapshots unit cost when shipping', async () => {
+      const ctx = buildService();
+      ctx.state.order = {
+        id: 'order-1',
+        status: OrderStatus.PROCESSING,
+        items: [
+          { id: 'item-1', variant_id: 'variant-a', quantity: 2 },
+          { id: 'item-2', variant_id: null, quantity: 1 },
+        ],
+      };
+      ctx.inventoryService.ship.mockResolvedValue(new Map([['variant-a', 85]]));
+
+      await ctx.service.updateStatus(
+        'order-1',
+        { status: OrderStatus.SHIPPED },
+        admin,
+      );
+
+      expect(ctx.inventoryService.ship).toHaveBeenCalledWith(
+        ctx.manager,
+        [{ variantId: 'variant-a', quantity: 2 }],
+        { refType: 'order', refId: 'order-1', actorId: 'admin-1' },
+      );
+      expect(ctx.manager.update).toHaveBeenCalledWith(OrderItem, 'item-1', {
+        unitCost: 85,
+      });
+      expect(ctx.manager.update).not.toHaveBeenCalledWith(
+        OrderItem,
+        'item-2',
+        expect.anything(),
+      );
+    });
+
+    it('does not touch stock for transitions other than ship/cancel', async () => {
+      const ctx = buildService();
+      ctx.state.order = {
+        id: 'order-1',
+        status: OrderStatus.SHIPPED,
+        items: [{ id: 'item-1', variant_id: 'variant-a', quantity: 2 }],
+      };
+
+      await ctx.service.updateStatus(
+        'order-1',
+        { status: OrderStatus.DELIVERED },
+        admin,
+      );
+
+      expect(ctx.inventoryService.ship).not.toHaveBeenCalled();
+      expect(ctx.inventoryService.release).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -937,11 +1014,15 @@ describe('OrdersService', () => {
         admin,
       );
 
-      expect(ctx.manager.increment).toHaveBeenCalledWith(
-        ProductVariant,
-        { id: 'variant-a' },
-        'stock',
-        3,
+      expect(ctx.inventoryService.release).toHaveBeenCalledWith(
+        ctx.manager,
+        [{ variantId: 'variant-a', quantity: 3 }],
+        {
+          refType: 'order',
+          refId: 'order-1',
+          actorId: 'admin-1',
+          note: 'Cancelled by staff',
+        },
       );
       expect(ctx.discountsService.releaseForOrder).toHaveBeenCalledWith(
         ctx.manager,
@@ -982,7 +1063,7 @@ describe('OrdersService', () => {
           admin,
         ),
       ).rejects.toThrow(/already been paid/);
-      expect(ctx.manager.increment).not.toHaveBeenCalled();
+      expect(ctx.inventoryService.release).not.toHaveBeenCalled();
       expect(ctx.state.order.status).toBe(OrderStatus.CONFIRMED);
     });
 
@@ -1010,6 +1091,133 @@ describe('OrdersService', () => {
       await expect(
         ctx.service.updateStatus('x', { status: OrderStatus.CONFIRMED }, admin),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('expiry of unpaid orders', () => {
+    const cutoff = new Date('2026-11-28T10:00:00Z');
+    const stale = (overrides: object = {}) => ({
+      id: 'order-1',
+      status: OrderStatus.PENDING,
+      orderNumber: 'ORD-1',
+      user_id: 'user-1',
+      createdAt: new Date('2026-11-28T09:00:00Z'),
+      items: [{ variant_id: 'variant-a', quantity: 2 }],
+      ...overrides,
+    });
+
+    it('pre-filters pending orders past the cutoff without offline or paid payments', async () => {
+      const ctx = buildService();
+      const qb = {
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ id: 'a' }, { id: 'b' }]),
+      };
+      ctx.orderRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await expect(
+        ctx.service.findExpiredUnpaidOrderIds(cutoff, 50),
+      ).resolves.toEqual(['a', 'b']);
+
+      expect(qb.where).toHaveBeenCalledWith('o.status = :status', {
+        status: OrderStatus.PENDING,
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith('o.createdAt < :cutoff', {
+        cutoff,
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('NOT EXISTS'),
+        {
+          offline: ['cod', 'bank_transfer'],
+          paid: ['completed', 'partially_refunded', 'refunded'],
+        },
+      );
+      expect(qb.limit).toHaveBeenCalledWith(50);
+    });
+
+    it('cancels a stale unpaid order as the system, releasing stock and codes', async () => {
+      const ctx = buildService();
+      ctx.state.order = stale();
+
+      await expect(ctx.service.expireUnpaid('order-1', cutoff)).resolves.toBe(
+        true,
+      );
+      await flush();
+
+      expect(ctx.manager.findOne).toHaveBeenCalledWith(Order, {
+        where: { id: 'order-1' },
+        lock: { mode: 'pessimistic_write' },
+      });
+      expect(ctx.inventoryService.release).toHaveBeenCalledWith(
+        ctx.manager,
+        [{ variantId: 'variant-a', quantity: 2 }],
+        expect.objectContaining({ refType: 'order', refId: 'order-1' }),
+      );
+      expect(ctx.discountsService.releaseForOrder).toHaveBeenCalledWith(
+        ctx.manager,
+        'order-1',
+      );
+      expect(ctx.state.order.status).toBe(OrderStatus.CANCELLED);
+      expect(savedCalls(ctx.manager, OrderStatusHistory)[0]).toEqual(
+        expect.objectContaining({
+          fromStatus: OrderStatus.PENDING,
+          toStatus: OrderStatus.CANCELLED,
+          changedByType: OrderStatusChangeActor.SYSTEM,
+          changedById: null,
+        }),
+      );
+      expect(ctx.mailService.sendOrderStatusUpdate).toHaveBeenCalled();
+    });
+
+    it.each([
+      ['confirmed meanwhile', stale({ status: OrderStatus.CONFIRMED }), []],
+      [
+        'not old enough',
+        stale({ createdAt: new Date('2026-11-28T10:30:00Z') }),
+        [],
+      ],
+      ['paid meanwhile', stale(), [{ method: 'stripe', status: 'completed' }]],
+      [
+        'paying cash on delivery',
+        stale(),
+        [{ method: 'cod', status: 'pending' }],
+      ],
+    ])('leaves the order alone when %s', async (_label, order, payments) => {
+      const ctx = buildService();
+      ctx.state.order = order;
+      ctx.manager.find.mockResolvedValue(payments);
+
+      await expect(ctx.service.expireUnpaid('order-1', cutoff)).resolves.toBe(
+        false,
+      );
+
+      expect(ctx.inventoryService.release).not.toHaveBeenCalled();
+      expect(ctx.state.order.status).toBe(order.status);
+    });
+
+    it('still expires when only a failed online payment exists', async () => {
+      const ctx = buildService();
+      ctx.state.order = stale({ items: [] });
+      ctx.manager.find.mockImplementation((entity: unknown) =>
+        Promise.resolve(
+          entity === Payment ? [{ method: 'stripe', status: 'failed' }] : [],
+        ),
+      );
+
+      await expect(ctx.service.expireUnpaid('order-1', cutoff)).resolves.toBe(
+        true,
+      );
+    });
+
+    it('is a no-op for a missing order', async () => {
+      const ctx = buildService();
+
+      await expect(ctx.service.expireUnpaid('nope', cutoff)).resolves.toBe(
+        false,
+      );
     });
   });
 

@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Not, Repository } from 'typeorm';
+import { DataSource, In, Not, Repository } from 'typeorm';
 import { Product } from './entities/product.entity';
 import { ProductImage } from './entities/product-image.entity';
 import { ProductVariant } from './entities/product-variant.entity';
@@ -19,6 +19,7 @@ import { UpdateProductVariantDto } from './dto/update-product-variant.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { ProductStatus } from './enums/product-status.enum';
+import { InventoryService } from '@/inventory/inventory.service';
 import { MediaService } from '@/media/media.service';
 import { generateUniqueSlug } from '@/common/utils/slug.util';
 import { ProductPolicy } from './policies/product.policy';
@@ -38,6 +39,8 @@ export class ProductsService {
     private readonly tagRepo: Repository<Tag>,
     private readonly mediaService: MediaService,
     private readonly productPolicy: ProductPolicy,
+    private readonly inventoryService: InventoryService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // ── Products ───────────────────────────────────────────────
@@ -90,11 +93,16 @@ export class ProductsService {
     }
 
     if (dto.variants?.length) {
-      await this.variantRepo.save(
-        dto.variants.map((v) =>
-          this.variantRepo.create({ ...v, product_id: saved.id }),
-        ),
-      );
+      const variants = dto.variants;
+      await this.dataSource.transaction(async (manager) => {
+        const created = await manager.save(
+          ProductVariant,
+          variants.map((v) =>
+            manager.create(ProductVariant, { ...v, product_id: saved.id }),
+          ),
+        );
+        await this.inventoryService.recordInitialStock(manager, created);
+      });
     }
 
     return this.findOne(saved.id);
@@ -308,9 +316,14 @@ export class ProductsService {
   ): Promise<ProductVariant> {
     await this.findOne(productId);
     await this.assertVariantSkuUnique(dto.sku);
-    return this.variantRepo.save(
-      this.variantRepo.create({ ...dto, product_id: productId }),
-    );
+    return this.dataSource.transaction(async (manager) => {
+      const created = await manager.save(
+        ProductVariant,
+        manager.create(ProductVariant, { ...dto, product_id: productId }),
+      );
+      await this.inventoryService.recordInitialStock(manager, [created]);
+      return created;
+    });
   }
 
   async updateVariant(
@@ -318,16 +331,42 @@ export class ProductsService {
     variantId: string,
     dto: UpdateProductVariantDto,
   ): Promise<ProductVariant> {
-    const variant = await this.variantRepo.findOne({
+    const existing = await this.variantRepo.findOne({
       where: { id: variantId, product_id: productId },
     });
-    if (!variant) throw new NotFoundException('Variant not found');
+    if (!existing) throw new NotFoundException('Variant not found');
 
-    if (dto.sku && dto.sku !== variant.sku)
+    if (dto.sku && dto.sku !== existing.sku)
       await this.assertVariantSkuUnique(dto.sku);
 
-    Object.assign(variant, dto);
-    return this.variantRepo.save(variant);
+    const { stock, ...fields } = dto;
+
+    return this.dataSource.transaction(async (manager) => {
+      // Locked so a concurrent order can't move `stock` between the read
+      // and the adjustment computed from it.
+      const variant = await manager.findOne(ProductVariant, {
+        where: { id: variantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!variant) throw new NotFoundException('Variant not found');
+
+      // Other fields first: save() writes the whole row, including the
+      // `stock` value read under the lock, so it must not run after the
+      // adjustment below.
+      if (Object.keys(fields).length) {
+        Object.assign(variant, fields);
+        await manager.save(ProductVariant, variant);
+      }
+      // `stock` is never written directly: setting it from the form is
+      // recorded as an adjustment of available stock in the ledger.
+      if (stock !== undefined) {
+        await this.inventoryService.setAvailable(manager, variant, stock, null);
+      }
+
+      return manager.findOneOrFail(ProductVariant, {
+        where: { id: variant.id },
+      });
+    });
   }
 
   async removeVariant(

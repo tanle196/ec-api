@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -20,10 +21,12 @@ import { WishlistsModule } from './wishlists/wishlists.module';
 import { DiscountsModule } from './discounts/discounts.module';
 import { MediaModule } from './media/media.module';
 import { BannersModule } from './banners/banners.module';
+import { InventoryModule } from './inventory/inventory.module';
 
 @Module({
   imports: [
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }]),
+    ScheduleModule.forRoot(),
     AppConfigModule,
     AuthModule,
     UsersModule,
@@ -41,6 +44,7 @@ import { BannersModule } from './banners/banners.module';
     DiscountsModule,
     MediaModule,
     BannersModule,
+    InventoryModule,
   ],
   controllers: [AppController],
   providers: [

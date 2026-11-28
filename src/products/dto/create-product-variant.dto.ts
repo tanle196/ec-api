@@ -32,6 +32,15 @@ export class CreateProductVariantDto {
   @IsOptional()
   stock?: number;
 
+  @ApiPropertyOptional({
+    example: 10,
+    description: 'Flag as low stock when available drops to this (null = off)',
+  })
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  lowStockThreshold?: number;
+
   @ApiPropertyOptional({ example: { color: 'red', size: 'L' } })
   @IsObject()
   @IsOptional()

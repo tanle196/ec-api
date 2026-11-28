@@ -77,4 +77,15 @@ export class OrderItem extends AbstractIdEntity {
     transformer: moneyTransformer,
   })
   paidAmount!: number;
+
+  // Variant's average cost when the line shipped (for gross margin). Null
+  // until shipped, or when the variant had no cost recorded yet.
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+    transformer: moneyTransformer,
+  })
+  unitCost!: number | null;
 }

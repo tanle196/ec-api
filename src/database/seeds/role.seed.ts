@@ -38,6 +38,10 @@ const ROLES: RoleSeedData[] = [
       { module: 'product', action: 'update' },
       { module: 'product', action: 'delete' },
       { module: 'product', action: 'publish' },
+      // inventory
+      { module: 'inventory', action: 'read' },
+      { module: 'inventory', action: 'create' },
+      { module: 'inventory', action: 'update' },
       // orders
       { module: 'order', action: 'read' },
       { module: 'order', action: 'update' },

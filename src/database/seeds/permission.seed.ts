@@ -335,6 +335,26 @@ const PERMISSIONS: Pick<
     description: 'Xoá ảnh',
     isSystem: true,
   },
+
+  // inventory
+  {
+    module: 'inventory',
+    action: PermissionAction.READ,
+    description: 'Xem tồn kho, sổ kho và phiếu nhập',
+    isSystem: true,
+  },
+  {
+    module: 'inventory',
+    action: PermissionAction.CREATE,
+    description: 'Tạo và sửa phiếu nhập kho nháp',
+    isSystem: true,
+  },
+  {
+    module: 'inventory',
+    action: PermissionAction.UPDATE,
+    description: 'Điều chỉnh tồn kho, xác nhận/huỷ phiếu nhập',
+    isSystem: true,
+  },
 ];
 
 export async function seedPermissions(
