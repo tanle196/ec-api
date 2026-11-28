@@ -112,9 +112,26 @@ describe('OrdersService', () => {
     };
     const configService = {
       getAppConfig: () => ({ shippingFlatFee: SHIPPING }),
+      getShippingConfig: () => ({ freeShippingThreshold: 0 }),
     };
     const cartsService = { getCart: jest.fn() };
     const outboxService = { enqueue: jest.fn().mockResolvedValue(undefined) };
+    const shippingRates = {
+      quote: jest.fn(
+        (p: { weightGrams: number }): Promise<object> =>
+          Promise.resolve({
+            fee: SHIPPING,
+            standardFee: SHIPPING,
+            zone: 'inter_province',
+            weightGrams: p.weightGrams,
+            freeShipping: null,
+          }),
+      ),
+      weightOf: jest.fn(
+        (lines: { weightGrams: number | null; quantity: number }[]) =>
+          lines.reduce((s, l) => s + (l.weightGrams ?? 500) * l.quantity, 0),
+      ),
+    };
     const inventoryService = {
       reserve: jest.fn().mockResolvedValue(undefined),
       release: jest.fn().mockResolvedValue(undefined),
@@ -134,6 +151,7 @@ describe('OrdersService', () => {
       new OrderPolicy(),
       inventoryService as never,
       outboxService as never,
+      shippingRates as never,
     );
     jest.spyOn(service['logger'], 'warn').mockImplementation(() => undefined);
     jest.spyOn(service['logger'], 'error').mockImplementation(() => undefined);
@@ -153,6 +171,7 @@ describe('OrdersService', () => {
       discountsService,
       cartsService,
       outboxService,
+      shippingRates,
     };
   };
 
@@ -383,6 +402,8 @@ describe('OrdersService', () => {
         province: 'HCM',
         country: 'VN',
         postalCode: null,
+        districtCode: '1442',
+        wardCode: '20109',
         isDefault: true,
       });
 
@@ -397,7 +418,52 @@ describe('OrdersService', () => {
         province: 'HCM',
         country: 'VN',
         postalCode: null,
+        districtCode: '1442',
+        wardCode: '20109',
       });
+    });
+
+    it('charges shipping from the rate table for the order weight', async () => {
+      const ctx = buildService();
+      ctx.variantRepo.find.mockResolvedValue([variant({ weightGrams: 300 })]);
+      ctx.shippingRates.quote.mockResolvedValueOnce({
+        fee: 27000,
+        standardFee: 27000,
+        zone: 'inter_province',
+        weightGrams: 900,
+        freeShipping: null,
+      });
+
+      await ctx.service.create('user-1', dto);
+
+      expect(ctx.shippingRates.quote).toHaveBeenCalledWith({
+        province: undefined,
+        weightGrams: 900,
+        subtotal: 59.97,
+      });
+      expect(savedCalls(ctx.manager, Order)[0]).toEqual(
+        expect.objectContaining({ shippingFee: 27000, weightGrams: 900 }),
+      );
+    });
+
+    it('waives shipping for a free-shipping code and records the waived fee', async () => {
+      const ctx = buildService();
+      const code = { id: 'd-ship', type: 'free_shipping' };
+      ctx.discountsService.resolveCode.mockResolvedValue(code);
+
+      await ctx.service.create('user-1', { ...dto, discountCode: 'FREESHIP' });
+
+      expect(ctx.discountsService.quote).not.toHaveBeenCalled();
+      expect(savedCalls(ctx.manager, Order)[0]).toEqual(
+        expect.objectContaining({ shippingFee: 0, discount: 0, total: 59.97 }),
+      );
+      expect(savedCalls(ctx.manager, OrderItem)[0]).toEqual([
+        expect.objectContaining({ shippingAmount: 0, paidAmount: 59.97 }),
+      ]);
+      expect(ctx.discountsService.redeem).toHaveBeenCalledWith(
+        ctx.manager,
+        expect.objectContaining({ discount: code, amount: SHIPPING }),
+      );
     });
 
     describe('idempotency key', () => {
@@ -760,13 +826,64 @@ describe('OrdersService', () => {
       });
       expect(ctx.inventoryService.release).not.toHaveBeenCalled();
       expect(ctx.inventoryService.reserve).not.toHaveBeenCalled();
-      expect(ctx.manager.update).toHaveBeenCalledWith(Order, 'order-1', {
+      expect(ctx.manager.update).toHaveBeenCalledWith(
+        Order,
+        'order-1',
+        expect.objectContaining({
+          address_id: 'address-2',
+          notes: 'leave at door',
+          subtotal: 19.99,
+          discount: 0,
+          total: 24.99,
+        }),
+      );
+    });
+
+    it('re-prices shipping when the new address is in another zone', async () => {
+      const ctx = buildService();
+      ctx.state.order = { ...pendingOrder(), weightGrams: 500 };
+      ctx.addressRepo.findOne.mockResolvedValue({
+        id: 'address-2',
+        province: 'Hà Nội',
+      });
+      ctx.shippingRates.quote.mockResolvedValueOnce({
+        fee: 30,
+        standardFee: 30,
+        zone: 'inter_province',
+        weightGrams: 500,
+        freeShipping: null,
+      });
+      ctx.manager.find.mockImplementation((entity: unknown) =>
+        Promise.resolve(
+          entity === OrderItem
+            ? [{ id: 'item-1', total: '19.99', discountAmount: '0' }]
+            : [],
+        ),
+      );
+
+      await ctx.service.update('order-1', 'user-1', {
         address_id: 'address-2',
-        shippingAddress: expect.objectContaining({}) as unknown,
-        notes: 'leave at door',
+      });
+
+      expect(ctx.shippingRates.quote).toHaveBeenCalledWith({
+        province: 'Hà Nội',
+        weightGrams: 500,
         subtotal: 19.99,
-        discount: 0,
-        total: 24.99,
+      });
+      expect(ctx.manager.update).toHaveBeenCalledWith(OrderItem, 'item-1', {
+        shippingAmount: 30,
+        paidAmount: 49.99,
+      });
+      expect(ctx.manager.update).toHaveBeenCalledWith(
+        Order,
+        'order-1',
+        expect.objectContaining({ shippingFee: 30, total: 49.99 }),
+      );
+      // Payments started for the old total no longer fit.
+      expect(ctx.paymentQb.where).toHaveBeenCalledWith(expect.any(String), {
+        orderId: 'order-1',
+        pending: 'pending',
+        reason: 'order_edited',
       });
     });
 

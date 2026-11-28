@@ -12,6 +12,8 @@ export class AddressMapper {
     province: entity.province,
     country: entity.country,
     postalCode: entity.postalCode,
+    districtCode: entity.districtCode ?? null,
+    wardCode: entity.wardCode ?? null,
     isDefault: entity.isDefault,
     createdAt: entity.createdAt,
     updatedAt: entity.updatedAt,

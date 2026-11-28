@@ -31,10 +31,11 @@ export class CreateDiscountDto {
 
   @ApiProperty({
     example: 20,
-    description: 'Percent (0–100) or fixed amount in VND',
+    description:
+      'Percent (0–100) or fixed amount in VND; ignored (send 0) for free_shipping',
   })
   @IsNumber()
-  @IsPositive()
+  @Min(0)
   value!: number;
 
   @ApiPropertyOptional({

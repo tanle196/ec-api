@@ -10,6 +10,7 @@ import appConfig from './environment/app.config';
 import mediaConfig from './environment/media.config';
 import stripeConfig from './environment/stripe.config';
 import vnpayConfig from './environment/vnpay.config';
+import shippingConfig from './environment/shipping.config';
 
 @Global()
 @Module({
@@ -26,6 +27,7 @@ import vnpayConfig from './environment/vnpay.config';
         mediaConfig,
         stripeConfig,
         vnpayConfig,
+        shippingConfig,
       ],
       validate: validateConfig,
       expandVariables: true,

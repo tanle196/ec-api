@@ -425,6 +425,7 @@ describe('DiscountsService', () => {
         type: DiscountType.PERCENT,
         value: 10,
         discountAmount: 25,
+        freeShipping: false,
       });
     });
 
@@ -574,5 +575,35 @@ describe('DiscountsService', () => {
       'usedCount',
       1,
     );
+  });
+
+  describe('free shipping codes', () => {
+    it('take nothing off the lines', async () => {
+      const { service } = buildService();
+      await expect(
+        service.quote(
+          {
+            ...discount,
+            type: DiscountType.FREE_SHIPPING,
+            value: '0',
+          } as never,
+          [line(100), line(50)],
+        ),
+      ).resolves.toEqual({ amount: 0, lineAmounts: [0, 0] });
+    });
+
+    it('may have a zero value, unlike other types', async () => {
+      const { service } = buildService();
+      await expect(
+        service.create({
+          code: 'ship',
+          type: DiscountType.FREE_SHIPPING,
+          value: 0,
+        }),
+      ).resolves.toBeDefined();
+      await expect(
+        service.create({ code: 'zero', type: DiscountType.FIXED, value: 0 }),
+      ).rejects.toThrow('Discount value must be greater than 0');
+    });
   });
 });

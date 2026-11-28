@@ -35,6 +35,15 @@ export class Address extends AbstractBaseEntity {
   @Column({ type: 'varchar', nullable: true })
   postalCode!: string | null;
 
+  // The shipping carrier's location codes for this address (from its
+  // master data, picked in the address form). Carriers that price or book
+  // by location (GHN: district id + ward code) need them.
+  @Column({ type: 'varchar', nullable: true })
+  districtCode!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  wardCode!: string | null;
+
   @Column({ default: false })
   isDefault!: boolean;
 }

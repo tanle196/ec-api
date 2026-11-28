@@ -12,6 +12,10 @@ export class AddressResponseDto {
   @ApiProperty() country!: string;
   @ApiPropertyOptional({ type: String, nullable: true })
   postalCode!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  districtCode!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  wardCode!: string | null;
   @ApiProperty() isDefault!: boolean;
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;

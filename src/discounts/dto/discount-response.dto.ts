@@ -40,4 +40,6 @@ export class ValidateDiscountResponseDto {
   @ApiProperty() value!: number;
   @ApiProperty({ description: 'Computed discount amount in VND' })
   discountAmount!: number;
+  @ApiProperty({ description: 'The code waives the shipping fee' })
+  freeShipping!: boolean;
 }

@@ -7,6 +7,7 @@ export const ConfigModules = {
   Media: 'media',
   Stripe: 'stripe',
   Vnpay: 'vnpay',
+  Shipping: 'shipping',
 } as const;
 
 export type ConfigModulesType =

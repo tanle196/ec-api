@@ -37,6 +37,20 @@ export class ProductVariant extends AbstractBaseEntity {
   @Column({ type: 'int', default: 0 })
   reserved!: number;
 
+  // Packed size, for shipping fees and carrier bookings. Null weight falls
+  // back to DEFAULT_ITEM_WEIGHT_GRAMS.
+  @Column({ type: 'int', nullable: true })
+  weightGrams!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  lengthCm!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  widthCm!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  heightCm!: number | null;
+
   // Flag the variant as low on stock when `stock` drops to this (null = off).
   @Column({ type: 'int', nullable: true })
   lowStockThreshold!: number | null;

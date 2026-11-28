@@ -43,6 +43,13 @@ export class ShipmentPolicy {
     return ShipmentPolicy.ORDER_STATUS[status];
   }
 
+  assertReadyToShip(orderStatus: OrderStatus): void {
+    if (orderStatus !== OrderStatus.PROCESSING)
+      throw new BadRequestException(
+        `Only processing orders can be handed to a carrier (order is "${orderStatus}")`,
+      );
+  }
+
   isActive(status: ShipmentStatus): boolean {
     return [
       ShipmentStatus.IN_TRANSIT,

@@ -10,8 +10,9 @@
 ## Business Rules
 
 - Discount `code` is stored uppercased and must be unique (`ConflictException` on duplicate at create/update).
-- `type` is either `percent` or `fixed` (`DiscountType` enum).
-- `value` must be a positive number; interpreted as a percentage (0–100) for `percent` type, or a fixed VND amount for `fixed` type.
+- `type` is `percent`, `fixed` or `free_shipping` (`DiscountType` enum).
+- `value` must be a positive number; interpreted as a percentage (0–100) for `percent` type, or a fixed VND amount for `fixed` type. For `free_shipping` it is unused (send `0`).
+- A `free_shipping` code takes nothing off the lines (`discountAmount` 0, `freeShipping: true` in the validation response); the order's `shippingFee` becomes 0 and the redemption records the waived fee (see [shipping.md](shipping.md)).
 - `minOrderValue` (optional): minimum subtotal required to apply the code; if the subtotal is below this, validation fails.
 - `usageLimit` (optional, `null` = unlimited): maximum number of times a code can be used in total; enforced via `usedCount >= usageLimit`.
 - `usedCount` increments by 1 each time a discount is applied to an order (`redeem`), and every use is recorded as a `discount_redemptions` row (`active`). Cancelling the order (customer or admin) releases its redemptions (`released`) and decrements `usedCount` (`releaseForOrder`), giving the use back. A refund does **not** release the use.
@@ -86,7 +87,7 @@ sequenceDiagram
 | `admin-discounts.controller.ts` | Admin CRUD endpoints for managing discount codes |
 | `discounts.service.ts` | Business logic: create/list/get/update/remove, code resolution, amount computation, usage tracking |
 | `entities/discount.entity.ts` | `Discount` TypeORM entity, many-to-many with `Order` |
-| `enums/discount-type.enum.ts` | `DiscountType` enum (`percent`, `fixed`) |
+| `enums/discount-type.enum.ts` | `DiscountType` enum (`percent`, `fixed`, `free_shipping`) |
 | `dto/*` | Request/response validation and Swagger schema definitions |
 | `discounts.module.ts` | Wires controllers/service/repository together, exports `DiscountsService` for use by `OrdersModule` |
 

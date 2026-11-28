@@ -162,4 +162,45 @@ export class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   VNPAY_RESULT_URL?: string;
+
+  // SHIPPING
+  @IsOptional()
+  @IsString()
+  SHOP_PROVINCE?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  DEFAULT_ITEM_WEIGHT_GRAMS: number = 500;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  FREE_SHIPPING_THRESHOLD: number = 0;
+
+  // GHN (optional)
+  @IsOptional()
+  @IsString()
+  GHN_TOKEN?: string;
+
+  @IsOptional()
+  @IsString()
+  GHN_SHOP_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  GHN_API_URL?: string;
+
+  @ValidateIf((env: EnvironmentVariables) => Boolean(env.GHN_TOKEN))
+  @IsString()
+  @MinLength(16)
+  GHN_WEBHOOK_SECRET?: string;
+
+  @IsOptional()
+  @IsInt()
+  GHN_SERVICE_TYPE_ID: number = 2;
+
+  @IsOptional()
+  @IsString()
+  GHN_REQUIRED_NOTE?: string;
 }

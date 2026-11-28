@@ -10,6 +10,8 @@ export type ShippingAddressSnapshot = Pick<
   | 'province'
   | 'country'
   | 'postalCode'
+  | 'districtCode'
+  | 'wardCode'
 >;
 
 export function snapshotAddress(address: Address): ShippingAddressSnapshot {
@@ -22,5 +24,7 @@ export function snapshotAddress(address: Address): ShippingAddressSnapshot {
     province: address.province,
     country: address.country,
     postalCode: address.postalCode ?? null,
+    districtCode: address.districtCode ?? null,
+    wardCode: address.wardCode ?? null,
   };
 }

@@ -95,6 +95,10 @@ export class Order extends AbstractBaseEntity {
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 
+  // Total packed weight, for the carrier booking.
+  @Column({ type: 'int', default: 0 })
+  weightGrams!: number;
+
   // Starts the return window; set when the order reaches DELIVERED.
   @Column({ type: 'timestamptz', nullable: true })
   deliveredAt!: Date | null;

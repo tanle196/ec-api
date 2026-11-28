@@ -149,6 +149,7 @@ export class DiscountsService {
       type: discount.type,
       value: Number(discount.value),
       discountAmount: amount,
+      freeShipping: discount.type === DiscountType.FREE_SHIPPING,
     };
   }
 
@@ -196,6 +197,10 @@ export class DiscountsService {
     lines: DiscountLine[],
     manager: EntityManager = this.discountRepo.manager,
   ): Promise<DiscountQuote> {
+    // Takes nothing off the lines; the order waives its shipping fee.
+    if (discount.type === DiscountType.FREE_SHIPPING) {
+      return { amount: 0, lineAmounts: lines.map(() => 0) };
+    }
     const eligible = await this.eligibilityFor(discount, lines, manager);
     const weights = lines.map((line, i) => (eligible[i] ? line.amount : 0));
     const base = toMoney(weights.reduce((sum, w) => sum.plus(w), new Big(0)));

@@ -7,6 +7,7 @@ import {
   OneToMany,
 } from 'typeorm';
 import { AbstractBaseEntity } from '@/common/entities/base.entity';
+import { moneyTransformer } from '@/common/utils/money.util';
 import { Order } from '../../entities/order.entity';
 import { ShipmentStatus } from '../enums/shipment-status.enum';
 import { ShipmentEvent } from './shipment-event.entity';
@@ -45,6 +46,20 @@ export class Shipment extends AbstractBaseEntity {
 
   @Column({ type: 'varchar', nullable: true })
   trackingNumber!: string | null;
+
+  // What the carrier charges the shop (vs. order.shippingFee, what the
+  // customer paid). Null for manual deliveries.
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+    transformer: moneyTransformer,
+  })
+  carrierFee!: number | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  expectedDeliveryAt!: Date | null;
 
   // Delivery attempts made (1 on hand-over, +1 per re-attempt).
   @Column({ type: 'int', default: 1 })

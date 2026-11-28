@@ -19,6 +19,7 @@
 - `country` defaults to `'VN'` at the entity level if not supplied.
 - `addressLine2` and `postalCode` are optional and nullable.
 - `fullName`, `phone`, `addressLine1`, `city`, `province` are required, non-empty strings on create.
+- Optional `districtCode` / `wardCode`: the carrier's location codes, picked from `GET /shipping/locations`. GHN bookings need both (see [shipping.md](shipping.md)); they are copied into the order's address snapshot.
 - `UpdateAddressDto` makes all `CreateAddressDto` fields optional (partial update); no field-level rule prevents clearing required fields to empty via update beyond DTO validation (validation still runs on any field that is provided).
 - List results (`findAllByUser`) are ordered with default address first (`isDefault: 'DESC'`), then by creation date ascending.
 
@@ -326,7 +327,7 @@ No body. `id` path param (UUID).
 
 | Entity | Description |
 |---|---|
-| `Address` (`addresses` table) | Stores a user's shipping address: contact info (`fullName`, `phone`), location fields (`addressLine1`, `addressLine2`, `city`, `province`, `country`, `postalCode`), `isDefault` flag, and `user_id` FK to `User` (`onDelete: 'CASCADE'`). Extends `AbstractBaseEntity` (`id`, `createdAt`, `updatedAt`). |
+| `Address` (`addresses` table) | Stores a user's shipping address: contact info (`fullName`, `phone`), location fields (`addressLine1`, `addressLine2`, `city`, `province`, `country`, `postalCode`, carrier `districtCode`/`wardCode`), `isDefault` flag, and `user_id` FK to `User` (`onDelete: 'CASCADE'`). Extends `AbstractBaseEntity` (`id`, `createdAt`, `updatedAt`). |
 | `User` | Owning side of the relation (`user.addresses`); not modified by this feature but referenced via `user_id`. |
 | `Order` (referenced elsewhere) | Holds `address_id` FK to `Address` with `onDelete: 'SET NULL'`; consumed by `OrdersService`, not by this module directly. |
 

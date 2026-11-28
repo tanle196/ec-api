@@ -42,6 +42,10 @@ export class ShippingAddressDto {
   @ApiProperty() country!: string;
   @ApiPropertyOptional({ type: String, nullable: true })
   postalCode!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  districtCode!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  wardCode!: string | null;
 }
 
 export class OrderResponseDto {

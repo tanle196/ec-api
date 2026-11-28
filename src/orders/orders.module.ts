@@ -7,6 +7,7 @@ import { DiscountsModule } from '@/discounts/discounts.module';
 import { CartsModule } from '@/carts/carts.module';
 import { InventoryModule } from '@/inventory/inventory.module';
 import { OutboxModule } from '@/outbox/outbox.module';
+import { ShippingModule } from '@/shipping/shipping.module';
 import { MailModule } from '@/mail/mail.module';
 import { UsersModule } from '@/users/users.module';
 // Only the Payment entity is imported here (not PaymentsModule) — cancel()
@@ -28,6 +29,9 @@ import { ShipmentEvent } from './shipments/entities/shipment-event.entity';
 import { Shipment } from './shipments/entities/shipment.entity';
 import { ShipmentPolicy } from './shipments/policies/shipment.policy';
 import { ShipmentsService } from './shipments/shipments.service';
+import { CarrierWebhooksController } from './shipments/carrier-webhooks.controller';
+import { CarrierWebhooksService } from './shipments/carrier-webhooks.service';
+import { ShippingQuoteController } from './shipping-quote.controller';
 import { OrderPolicy } from './policies/order.policy';
 
 @Module({
@@ -47,6 +51,7 @@ import { OrderPolicy } from './policies/order.policy';
     CartsModule,
     InventoryModule,
     OutboxModule,
+    ShippingModule,
     MailModule,
     UsersModule,
   ],
@@ -54,6 +59,8 @@ import { OrderPolicy } from './policies/order.policy';
     OrdersController,
     AdminOrdersController,
     AdminShipmentsController,
+    CarrierWebhooksController,
+    ShippingQuoteController,
   ],
   providers: [
     OrdersService,
@@ -63,6 +70,7 @@ import { OrderPolicy } from './policies/order.policy';
     OrderNotificationsHandler,
     ShipmentsService,
     ShipmentPolicy,
+    CarrierWebhooksService,
   ],
   exports: [OrdersService, ShipmentsService],
 })

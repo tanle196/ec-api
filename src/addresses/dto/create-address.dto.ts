@@ -43,6 +43,22 @@ export class CreateAddressDto {
   postalCode?: string;
 
   @ApiPropertyOptional({ example: false, default: false })
+  @ApiPropertyOptional({
+    example: '1442',
+    description: 'Carrier district code (from GET /shipping/locations)',
+  })
+  @IsString()
+  @IsOptional()
+  districtCode?: string;
+
+  @ApiPropertyOptional({
+    example: '20109',
+    description: 'Carrier ward code (from GET /shipping/locations)',
+  })
+  @IsString()
+  @IsOptional()
+  wardCode?: string;
+
   @IsBoolean()
   @IsOptional()
   isDefault?: boolean;

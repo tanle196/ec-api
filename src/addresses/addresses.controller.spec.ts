@@ -16,6 +16,8 @@ describe('AddressesController', () => {
     province: 'Hồ Chí Minh',
     country: 'VN',
     postalCode: null,
+    districtCode: '1442',
+    wardCode: '20109',
     isDefault: true,
     createdAt,
     updatedAt: createdAt,

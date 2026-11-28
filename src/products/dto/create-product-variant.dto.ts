@@ -32,6 +32,30 @@ export class CreateProductVariantDto {
   @IsOptional()
   stock?: number;
 
+  @ApiPropertyOptional({ example: 350, description: 'Packed weight (g)' })
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  weightGrams?: number;
+
+  @ApiPropertyOptional({ example: 30, description: 'Packed length (cm)' })
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  lengthCm?: number;
+
+  @ApiPropertyOptional({ example: 20, description: 'Packed width (cm)' })
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  widthCm?: number;
+
+  @ApiPropertyOptional({ example: 5, description: 'Packed height (cm)' })
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  heightCm?: number;
+
   @ApiPropertyOptional({
     example: 10,
     description: 'Flag as low stock when available drops to this (null = off)',

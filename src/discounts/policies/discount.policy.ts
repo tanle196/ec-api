@@ -7,6 +7,9 @@ import { DiscountType } from '../enums/discount-type.enum';
 @Injectable()
 export class DiscountPolicy {
   assertValidValue(type: DiscountType, value: number): void {
+    if (type !== DiscountType.FREE_SHIPPING && !(value > 0)) {
+      throw new BadRequestException('Discount value must be greater than 0');
+    }
     if (type === DiscountType.PERCENT && value > 100) {
       throw new BadRequestException(
         'Percent discount value must be between 0 and 100',

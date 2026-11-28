@@ -16,7 +16,7 @@
 - **Expiry**: a `PENDING` order older than `PENDING_ORDER_TTL_MINUTES` (default 30, `0` disables) that has no payment by an offline method (`cod`, `bank_transfer`) and no completed/refunded payment is cancelled by the system every minute (`OrderExpiryScheduler` → `OrdersService.expireUnpaid`), releasing its stock and discount uses. Each order is re-checked under its row lock, so a payment confirmed meanwhile wins.
 - `checkout` requires a non-empty cart (`400 Cart is empty`) and, on success, deletes the user's cart items.
 - Discount codes are optional; when present, resolved/validated via `DiscountsService.resolveCode` and its usage counter incremented.
-- New orders always start in `OrderStatus.PENDING`, with `total = subtotal + shippingFee - discount` (shippingFee from app config).
+- New orders always start in `OrderStatus.PENDING`, with `total = subtotal + shippingFee - discount`. `shippingFee` comes from the shop's rate table by zone and weight (free above `FREE_SHIPPING_THRESHOLD` or with a `free_shipping` code); the order stores its packed `weightGrams`. Editing items or address re-prices it. See [shipping.md](shipping.md); `POST /shipping/quote` previews it.
 - Each order item stores its share of the order money: `discountAmount` (its share of the discount, 0 for lines outside a scoped code), `shippingAmount` (shipping fee split by line total) and `paidAmount = total - discountAmount + shippingAmount`. Shares are rounded so the per-line values sum exactly to `order.discount`, `order.shippingFee` and `order.total`. Editing a pending order's items recomputes them.
 - Cancelling an order (customer or admin) also releases its discount redemptions, giving the code's use back.
 - Cancelling, expiring or editing (items) an order marks its `pending` payments `failed`. A payment captured afterwards is handled by `confirmAfterPayment`: a cancelled order is revived when its stock can be reserved again, otherwise the payment is refunded (see [payments.md](payments.md#late-payments)).
@@ -44,6 +44,8 @@
   | `returned` | → `returned_to_sender` | goods restocked (`return_restock`); outbox `order.returned_to_sender` → payments refunds what was paid / voids uncollected COD |
 
   At most one shipment per order is on its way (`in_transit`/`delivery_failed`/`returning`); repeating the current status only adds tracking history. Orders already shipped/delivered before shipments existed got a `legacy` shipment.
+
+  Handing over to an integrated carrier (GHN) without a `trackingNumber` books the parcel first and stores the tracking number, `carrierFee` and `expectedDeliveryAt`; carrier webhooks (`POST /shipping/webhooks/:carrier`) then apply shipment events with source `carrier`. See [shipping.md](shipping.md#carriers).
 - **Completion**: hourly, `delivered` orders whose `deliveredAt` is older than `RETURN_WINDOW_DAYS` (default 7) and with no `pending` refund request become `completed`.
 - **Delivery address snapshot**: `shippingAddress` (jsonb) stores the address as it was when the order was placed or its address last changed; editing or deleting the address book entry doesn't affect it.
 - **Idempotency**: `POST /orders` and `POST /orders/checkout` accept an `Idempotency-Key` header (1–100 printable ASCII). The same key from the same customer returns the order the first request placed — also when two requests race (unique index on `user_id` + key).
@@ -430,12 +432,14 @@ Same shape as `GET /orders/me/:id/history` response.
 
 | Entity | Description |
 |---|---|
-| `Order` (`orders`) | Core order record: user, address, order number, status, subtotal/shippingFee/discount/total, notes, items, applied discounts |
+| `Order` (`orders`) | Core order record: user, address, order number, status, subtotal/shippingFee/discount/total, weightGrams, notes, items, applied discounts |
 | `OrderItem` (`order_items`) | Line item snapshot: variant reference (nullable, `SET NULL` on variant delete), product/variant name, unit price, quantity, total |
 | `OrderStatusHistory` (`order_status_history`) | Audit trail of status transitions: from/to status, actor type/id, optional note |
 | `Payment` (`payments`, `src/payments`) | Payment attempt for an order: method, status, amount, gateway transaction id, metadata, paidAt |
 | `Refund` (`refunds`, `src/payments`) | Refund record for a payment: amount, reason, status, gateway transaction id, actor, items |
 | `RefundItem` (`refund_items`, `src/payments`) | Per-order-item portion of a refund: order_item_id, quantity, amount |
+| `Shipment` (`shipments`) | Hand-over to a carrier: carrier, tracking number, status, attempts, `carrierFee`, `expectedDeliveryAt` |
+| `ShippingRate` / `CarrierWebhookEvent` (`src/shipping`) | Shop rate table per zone; inbound carrier webhooks, once per `(carrier, eventKey)` |
 | `PaymentWebhookEvent` (`src/payments`) | Idempotency/audit record of inbound gateway webhook events (e.g. Stripe) |
 
 ---
@@ -478,6 +482,7 @@ TODO: No domain/integration events (e.g. `EventEmitter2`) are emitted by the ord
 - `Order`, `OrderItem`, `OrderStatusHistory` repositories (TypeORM, injected via `@InjectRepository`).
 - `DiscountsService` (`src/discounts`) — discount resolution and amount computation.
 - `CartsService` (`src/carts`) — cart retrieval for checkout.
+- `ShippingRatesService` / `CarrierRegistry` (`src/shipping`) — shipping fee quotes and carrier bookings; `CarrierWebhooksService` (`src/orders/shipments`) applies carrier updates.
 - `MailService` (`src/mail`) — order confirmation / status update emails.
 - `UsersService` (`src/users`) — resolves user email for notifications.
 - `PaymentsService` (`src/payments/payments.service.ts`) — payment lifecycle, refunds, calls `OrdersService.applyStatusChange`.

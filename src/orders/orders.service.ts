@@ -17,6 +17,11 @@ import Big from 'big.js';
 import { Address } from '@/addresses/entities/address.entity';
 import { ProductVariant } from '@/products/entities/product-variant.entity';
 import { Discount } from '@/discounts/entities/discount.entity';
+import { DiscountType } from '@/discounts/enums/discount-type.enum';
+import {
+  ShippingQuote,
+  ShippingRatesService,
+} from '@/shipping/shipping-rates.service';
 import { DiscountsService } from '@/discounts/discounts.service';
 import { CartsService } from '@/carts/carts.service';
 import { CartItem } from '@/carts/entities/cart-item.entity';
@@ -48,9 +53,11 @@ import { allocateOrderLines, LineAllocation } from './pricing/order-pricing';
 
 interface ResolvedOrderItem {
   variant_id: string;
-  // Not persisted on the item; only used to match scoped discount codes.
+  // Not persisted on the item; used to match scoped discount codes and to
+  // weigh the order for shipping.
   product_id: string;
   category_id: string;
+  weightGrams: number | null;
   productName: string;
   variantName: string | null;
   unitPrice: number;
@@ -59,9 +66,12 @@ interface ResolvedOrderItem {
 }
 
 interface OrderPricing {
-  // Codes in the order they were applied, with what each took off.
+  // Codes in the order they were applied, with what each took off (a
+  // free-shipping code: the fee it waived).
   applied: { discount: Discount; amount: number }[];
   discountTotal: number;
+  // What the customer pays for shipping, after any free-shipping code.
+  shippingFee: number;
   // Aligned with the resolved items.
   lines: LineAllocation[];
 }
@@ -88,6 +98,7 @@ export class OrdersService {
     private readonly orderPolicy: OrderPolicy,
     private readonly inventoryService: InventoryService,
     private readonly outboxService: OutboxService,
+    private readonly shippingRates: ShippingRatesService,
   ) {}
 
   /**
@@ -119,11 +130,15 @@ export class OrdersService {
       subtotal,
       userId,
     );
-    const shippingFee = this.configService.getAppConfig().shippingFlatFee;
+    const shipping = await this.quoteShippingFor(
+      address.province,
+      resolvedItems,
+      subtotal,
+    );
     const pricing = await this.priceOrder(
       resolvedItems,
       discount ? [discount] : [],
-      shippingFee,
+      shipping.fee,
     );
 
     return this.placeOnce(userId, idempotencyKey, (manager) =>
@@ -132,7 +147,7 @@ export class OrdersService {
         address,
         resolvedItems,
         subtotal,
-        shippingFee,
+        weightGrams: shipping.weightGrams,
         pricing,
         notes: dto.notes,
         idempotencyKey,
@@ -172,11 +187,15 @@ export class OrdersService {
       subtotal,
       userId,
     );
-    const shippingFee = this.configService.getAppConfig().shippingFlatFee;
+    const shipping = await this.quoteShippingFor(
+      address.province,
+      resolvedItems,
+      subtotal,
+    );
     const pricing = await this.priceOrder(
       resolvedItems,
       discount ? [discount] : [],
-      shippingFee,
+      shipping.fee,
     );
 
     return this.placeOnce(userId, idempotencyKey, (manager) =>
@@ -185,13 +204,83 @@ export class OrdersService {
         address,
         resolvedItems,
         subtotal,
-        shippingFee,
+        weightGrams: shipping.weightGrams,
         pricing,
         notes: dto.notes,
         cartId: cart.id,
         idempotencyKey,
       }),
     );
+  }
+
+  /**
+   * What shipping would cost for these items to this address, as checkout
+   * will charge it: the shop's rate table, free above the shop-wide
+   * threshold or with a free-shipping code. Items default to the cart.
+   */
+  async quoteShipping(
+    userId: string,
+    dto: {
+      address_id: string;
+      items?: { variant_id: string; quantity: number }[];
+      discountCode?: string;
+    },
+  ): Promise<
+    ShippingQuote & {
+      freeShipping: 'threshold' | 'discount_code' | null;
+      freeShippingThreshold: number | null;
+    }
+  > {
+    const address = await this.addressRepo.findOne({
+      where: { id: dto.address_id, user_id: userId },
+    });
+    if (!address) throw new NotFoundException('Address not found');
+
+    let items = dto.items;
+    if (!items) {
+      const cart = await this.cartsService.getCart(userId);
+      this.orderPolicy.assertCartNotEmpty(cart.items);
+      items = cart.items.map((i) => ({
+        variant_id: i.variant_id,
+        quantity: i.quantity,
+      }));
+    }
+
+    const { subtotal, resolvedItems } = await this.resolveOrderItems(items);
+    const quote = await this.quoteShippingFor(
+      address.province,
+      resolvedItems,
+      subtotal,
+    );
+    const discount = await this.resolveDiscount(
+      dto.discountCode,
+      subtotal,
+      userId,
+    );
+    const threshold =
+      this.configService.getShippingConfig().freeShippingThreshold || null;
+
+    if (discount?.type === DiscountType.FREE_SHIPPING && quote.fee > 0) {
+      return {
+        ...quote,
+        fee: 0,
+        freeShipping: 'discount_code',
+        freeShippingThreshold: threshold,
+      };
+    }
+    return { ...quote, freeShippingThreshold: threshold };
+  }
+
+  private quoteShippingFor(
+    province: string,
+    items: ResolvedOrderItem[],
+    subtotal: number,
+  ): Promise<ShippingQuote> {
+    return this.shippingRates.quote({
+      province,
+      weightGrams: this.shippingRates.weightOf(items),
+      subtotal,
+    });
   }
 
   private async findByIdempotencyKey(
@@ -267,6 +356,7 @@ export class OrdersService {
         variant_id: variant.id,
         product_id: variant.product.id,
         category_id: variant.product.category_id,
+        weightGrams: variant.weightGrams ?? null,
         productName: variant.product.name,
         variantName: variant.name,
         unitPrice,
@@ -304,8 +394,15 @@ export class OrdersService {
     const remaining = resolvedItems.map((item) => new Big(item.total));
     const lineDiscounts = resolvedItems.map(() => new Big(0));
     const applied: OrderPricing['applied'] = [];
+    let chargedShipping = shippingFee;
 
     for (const discount of discounts) {
+      // Takes the shipping fee off instead of anything on the lines.
+      if (discount.type === DiscountType.FREE_SHIPPING) {
+        applied.push({ discount, amount: chargedShipping });
+        chargedShipping = 0;
+        continue;
+      }
       const quote = await this.discountsService.quote(
         discount,
         resolvedItems.map((item, i) => ({
@@ -329,10 +426,11 @@ export class OrdersService {
     return {
       applied,
       discountTotal,
+      shippingFee: chargedShipping,
       lines: allocateOrderLines(
         resolvedItems.map((item) => item.total),
         lineDiscounts.map((d) => toMoney(d)),
-        shippingFee,
+        chargedShipping,
       ),
     };
   }
@@ -364,14 +462,15 @@ export class OrdersService {
       address: Address;
       resolvedItems: ResolvedOrderItem[];
       subtotal: number;
-      shippingFee: number;
+      weightGrams: number;
       pricing: OrderPricing;
       notes?: string;
       cartId?: string;
       idempotencyKey?: string;
     },
   ): Promise<Order> {
-    const { shippingFee, pricing } = params;
+    const { pricing } = params;
+    const { shippingFee } = pricing;
     const total = toMoney(
       new Big(params.subtotal).plus(shippingFee).minus(pricing.discountTotal),
     );
@@ -384,6 +483,7 @@ export class OrdersService {
       status: OrderStatus.PENDING,
       subtotal: params.subtotal,
       shippingFee,
+      weightGrams: params.weightGrams,
       discount: pricing.discountTotal,
       total,
       notes: params.notes ?? null,
@@ -576,10 +676,15 @@ export class OrdersService {
         for (const discount of order.discounts) {
           this.orderPolicy.assertStillMeetsDiscountMinimum(discount, subtotal);
         }
+        const shipping = await this.quoteShippingFor(
+          shippingAddress?.province ?? '',
+          resolvedItems,
+          subtotal,
+        );
         const pricing = await this.priceOrder(
           resolvedItems,
           order.discounts,
-          Number(order.shippingFee),
+          shipping.fee,
           manager,
         );
         for (const { discount, amount } of pricing.applied) {
@@ -599,10 +704,19 @@ export class OrdersService {
 
         order.subtotal = subtotal;
         order.discount = pricing.discountTotal;
+        order.shippingFee = pricing.shippingFee;
+        order.weightGrams = shipping.weightGrams;
         order.total = toMoney(
           new Big(subtotal)
-            .plus(Number(order.shippingFee))
+            .plus(pricing.shippingFee)
             .minus(pricing.discountTotal),
+        );
+      } else if (addressId !== order.address_id) {
+        // Same goods, new destination: the zone and so the fee may change.
+        await this.repriceShipping(
+          manager,
+          order,
+          shippingAddress?.province ?? '',
         );
       }
 
@@ -619,6 +733,8 @@ export class OrdersService {
         notes: order.notes,
         subtotal: order.subtotal,
         discount: order.discount,
+        shippingFee: order.shippingFee,
+        weightGrams: order.weightGrams,
         total: order.total,
       });
 
@@ -1144,6 +1260,51 @@ export class OrdersService {
     }
   }
 
+  /**
+   * Re-prices shipping for an edited destination, keeping the goods, their
+   * prices and discounts as they are. Spreads the new fee over the lines
+   * again so their paidAmounts still add up to the new total, and voids
+   * payments started for the old total. Mutates `order` (the caller saves
+   * it).
+   */
+  private async repriceShipping(
+    manager: EntityManager,
+    order: Order,
+    province: string,
+  ): Promise<void> {
+    const quote = await this.shippingRates.quote({
+      province,
+      weightGrams: order.weightGrams,
+      subtotal: Number(order.subtotal),
+    });
+    const waived = order.discounts?.some(
+      (d) => d.type === DiscountType.FREE_SHIPPING,
+    );
+    const fee = waived ? 0 : quote.fee;
+    if (fee === Number(order.shippingFee)) return;
+
+    const items = await manager.find(OrderItem, {
+      where: { order_id: order.id },
+    });
+    const lines = allocateOrderLines(
+      items.map((i) => Number(i.total)),
+      items.map((i) => Number(i.discountAmount)),
+      fee,
+    );
+    for (const [i, item] of items.entries()) {
+      await manager.update(OrderItem, item.id, {
+        shippingAmount: lines[i].shippingAmount,
+        paidAmount: lines[i].paidAmount,
+      });
+    }
+
+    order.shippingFee = fee;
+    order.total = toMoney(
+      new Big(Number(order.subtotal)).plus(fee).minus(Number(order.discount)),
+    );
+    await this.voidPendingPayments(manager, order.id, 'order_edited');
+  }
+
   // A cancelled order will never be paid through its open payments: mark
   // them FAILED so they stop counting as active. If the gateway still
   // captures one, completeFromGatewayEvent takes it (FAILED isn't terminal)
@@ -1247,6 +1408,7 @@ export class OrdersService {
       status: OrderStatus;
       subtotal: number;
       shippingFee: number;
+      weightGrams: number;
       discount: number;
       total: number;
       notes: string | null;
