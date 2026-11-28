@@ -7,6 +7,7 @@ import Big from 'big.js';
 import { Order } from '@/orders/entities/order.entity';
 import { OrderStatus } from '@/orders/enums/order-status.enum';
 import { Payment } from '../entities/payment.entity';
+import { PaymentMethod } from '../enums/payment-method.enum';
 import { PaymentStatus } from '../enums/payment-status.enum';
 
 // Business rules for payments and refunds. Lookups, locking, gateway calls,
@@ -48,6 +49,21 @@ export class PaymentPolicy {
     PaymentStatus.REFUNDED,
   ];
 
+  // Methods that need a gateway to take the money. Offline methods (COD,
+  // bank transfer) are settled by staff and never need one.
+  private static readonly ONLINE_METHODS: PaymentMethod[] = [
+    PaymentMethod.STRIPE,
+    PaymentMethod.VNPAY,
+    PaymentMethod.MOMO,
+    PaymentMethod.ZALOPAY,
+  ];
+
+  // Order statuses in which the goods have reached the customer, so a
+  // carrier's COD remittance for it makes sense.
+  private static readonly COD_SETTLEABLE_ORDER_STATUSES: OrderStatus[] = [
+    OrderStatus.DELIVERED,
+  ];
+
   // ── Ownership ─────────────────────────────────────────────
 
   assertOrderOwnedBy(order: Pick<Order, 'user_id'>, userId: string): void {
@@ -60,6 +76,23 @@ export class PaymentPolicy {
     if (PaymentPolicy.UNPAYABLE_ORDER_STATUSES.includes(order.status))
       throw new BadRequestException(
         `Cannot pay for an order with status "${order.status}"`,
+      );
+  }
+
+  // Without a gateway an online payment would sit PENDING forever with
+  // nowhere for the customer to pay.
+  assertMethodAvailable(method: PaymentMethod, hasGateway: boolean): void {
+    if (PaymentPolicy.ONLINE_METHODS.includes(method) && !hasGateway)
+      throw new BadRequestException(
+        `Payment method "${method}" is not available`,
+      );
+  }
+
+  // `max` 0 means no limit.
+  assertCodAllowed(order: Pick<Order, 'total'>, max: number): void {
+    if (max > 0 && Number(order.total) > max)
+      throw new BadRequestException(
+        `Cash on delivery is only available for orders up to ${max}`,
       );
   }
 
@@ -127,5 +160,33 @@ export class PaymentPolicy {
       throw new BadRequestException(
         'Refund amount exceeds the remaining refundable balance',
       );
+  }
+
+  // ── Settlement ────────────────────────────────────────────
+
+  assertOrderFulfillable(
+    outcome: 'confirmed' | 'revived' | 'not_revivable' | 'unchanged',
+  ): void {
+    if (outcome === 'not_revivable')
+      throw new BadRequestException(
+        'The order was cancelled and its items are no longer in stock; it cannot be marked paid',
+      );
+  }
+
+  // Money compared at cent precision.
+  amountsMatch(a: number, b: number): boolean {
+    return new Big(a).round(2).eq(new Big(b).round(2));
+  }
+
+  checkCodSettlement(
+    order: Pick<Order, 'status'>,
+    payment: Pick<Payment, 'amount'>,
+    remitted: number,
+  ): 'ok' | 'not_delivered' | 'amount_mismatch' {
+    if (!PaymentPolicy.COD_SETTLEABLE_ORDER_STATUSES.includes(order.status))
+      return 'not_delivered';
+    if (!this.amountsMatch(remitted, Number(payment.amount)))
+      return 'amount_mismatch';
+    return 'ok';
   }
 }

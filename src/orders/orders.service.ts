@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
@@ -510,6 +511,10 @@ export class OrdersService {
           this.stockLines(resolvedItems),
           { refType: 'order', refId: order.id, actorId: userId },
         );
+        // A payment started before the edit is for the old total; the
+        // customer has to start a new one. If the old checkout still gets
+        // paid, completion flags the amount mismatch.
+        await this.voidPendingPayments(manager, order.id, 'order_edited');
 
         for (const discount of order.discounts) {
           this.orderPolicy.assertStillMeetsDiscountMinimum(discount, subtotal);
@@ -600,6 +605,7 @@ export class OrdersService {
           note: 'Cancelled by customer',
         });
         await this.discountsService.releaseForOrder(manager, order.id);
+        await this.voidPendingPayments(manager, order.id, 'order_cancelled');
 
         order.status = OrderStatus.CANCELLED;
         await manager.save(Order, order);
@@ -676,6 +682,7 @@ export class OrdersService {
       const note = 'Expired: not paid within the hold window';
       await this.releaseStock(manager, order, { note });
       await this.discountsService.releaseForOrder(manager, order.id);
+      await this.voidPendingPayments(manager, order.id, 'order_expired');
 
       order.status = OrderStatus.CANCELLED;
       await manager.save(Order, order);
@@ -728,6 +735,7 @@ export class OrdersService {
             note: dto.note ?? 'Cancelled by staff',
           });
           await this.discountsService.releaseForOrder(manager, order.id);
+          await this.voidPendingPayments(manager, order.id, 'order_cancelled');
         }
 
         if (dto.status === OrderStatus.SHIPPED) {
@@ -754,6 +762,91 @@ export class OrdersService {
     void this.notifyOrderStatusUpdate(updated, fromStatus);
 
     return updated;
+  }
+
+  /**
+   * Moves an order on after its payment was captured, inside the payment's
+   * transaction (`manager`):
+   * - PENDING   -> CONFIRMED ('confirmed')
+   * - CANCELLED -> CONFIRMED when the stock can be held again, with its
+   *   discount uses reinstated ('revived'): the customer paid after the
+   *   order expired or was cancelled, and we still have the goods.
+   * - CANCELLED and the stock is gone -> unchanged ('not_revivable'); the
+   *   caller refunds.
+   * - anything else -> unchanged ('unchanged').
+   *
+   * Callers notify with `notifyOrderStatusChanged` after their commit.
+   */
+  async confirmAfterPayment(
+    orderId: string,
+    actor: {
+      actorType: OrderStatusChangeActor;
+      actorId?: string;
+      note?: string;
+    },
+    manager: EntityManager,
+  ): Promise<{
+    outcome: 'confirmed' | 'revived' | 'not_revivable' | 'unchanged';
+    order: Order;
+    fromStatus: OrderStatus | null;
+  }> {
+    const order = await manager.findOne(Order, {
+      where: { id: orderId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (order.status === OrderStatus.PENDING) {
+      const changed = await this.applyStatusChange(
+        orderId,
+        OrderStatus.CONFIRMED,
+        actor,
+        manager,
+      );
+      return { outcome: 'confirmed', ...changed };
+    }
+
+    if (order.status !== OrderStatus.CANCELLED) {
+      return { outcome: 'unchanged', order, fromStatus: null };
+    }
+
+    const items = await manager.find(OrderItem, {
+      where: { order_id: orderId },
+    });
+    try {
+      // Savepoint: if any line can't be held, the lines already reserved
+      // roll back with it and the payment transaction carries on.
+      await manager.transaction((savepoint) =>
+        this.inventoryService.reserve(savepoint, this.stockLines(items), {
+          refType: 'order',
+          refId: orderId,
+          note: 'Revived: paid after cancellation',
+        }),
+      );
+    } catch (error) {
+      if (error instanceof UnprocessableEntityException) {
+        return { outcome: 'not_revivable', order, fromStatus: null };
+      }
+      throw error;
+    }
+
+    // The customer paid the discounted price, so the codes are honoured
+    // even if they have since run out.
+    await this.discountsService.reinstateForOrder(manager, orderId);
+
+    const fromStatus = order.status;
+    order.status = OrderStatus.CONFIRMED;
+    await manager.save(Order, order);
+    await this.recordStatusChange(manager, {
+      orderId,
+      fromStatus,
+      toStatus: OrderStatus.CONFIRMED,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      note: `Revived: paid after cancellation. ${actor.note ?? ''}`.trim(),
+    });
+
+    return { outcome: 'revived', order, fromStatus };
   }
 
   /**
@@ -903,6 +996,31 @@ export class OrdersService {
         'Cannot cancel an order that has already been paid — request a refund instead',
       );
     }
+  }
+
+  // A cancelled order will never be paid through its open payments: mark
+  // them FAILED so they stop counting as active. If the gateway still
+  // captures one, completeFromGatewayEvent takes it (FAILED isn't terminal)
+  // and confirmAfterPayment decides whether to revive or refund.
+  private async voidPendingPayments(
+    manager: EntityManager,
+    orderId: string,
+    reason: 'order_cancelled' | 'order_expired' | 'order_edited',
+  ): Promise<void> {
+    await manager
+      .createQueryBuilder()
+      .update(Payment)
+      .set({
+        status: PaymentStatus.FAILED,
+        metadata: () =>
+          `COALESCE("metadata", '{}'::jsonb) || jsonb_build_object('failureReason', CAST(:reason AS text))`,
+      })
+      .where('order_id = :orderId AND status = :pending', {
+        orderId,
+        pending: PaymentStatus.PENDING,
+        reason,
+      })
+      .execute();
   }
 
   private stockLines(

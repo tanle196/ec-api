@@ -2,12 +2,46 @@
 
 ## Overview
 - **Purpose**: Manage payments for orders (creation, status tracking, refunds) and integrate with external payment gateways, currently Stripe (Checkout Sessions + webhooks).
-- **Scope**: Payment creation and lookup for customers, admin payment/refund management, and Stripe webhook ingestion for asynchronous payment/refund confirmation. Other methods (`cod`, `vnpay`, `momo`, `zalopay`, `bank_transfer`) exist in the enum but only `stripe` has a registered gateway provider — the rest are recorded as pending payments with no gateway interaction.
+- **Scope**: Payment creation and lookup for customers, admin payment/refund management, gateway integrations (Stripe Checkout + webhooks; VNPay v2.1.0 payment URL + IPN + refund + status query), late-payment handling, gateway reconciliation, COD settlement and the payment issue queue. `cod` and `bank_transfer` are offline (settled by staff); `momo`/`zalopay` exist in the enum but have no gateway yet and are rejected at payment creation.
 - **Entry point**: `src/payments/payments.module.ts` — registers `PaymentsController`, `AdminPaymentsController`, `PaymentWebhooksController`, `PaymentsService`, `PaymentWebhooksService`, `PaymentGatewayRegistry`, and the Stripe providers.
 
 ---
 
 ## Business Rules
+
+### Methods and gateways
+- Online methods (`stripe`, `vnpay`, `momo`, `zalopay`) need a registered gateway; creating a payment with one that has none is rejected (`400 Payment method "<m>" is not available`). VNPay is registered only when `VNPAY_TMN_CODE` and `VNPAY_HASH_SECRET` are set.
+- `cod` is rejected above `COD_MAX_ORDER_TOTAL` (`0` = no limit).
+- Metadata a gateway returns at initiation is kept on the payment and merged (never replaced) by later webhook/IPN data, e.g. VNPay's `vnpCreateDate`, `vnpTransactionNo` needed for refunds and status queries.
+- Stripe Checkout Sessions expire with the order's stock hold (`PENDING_ORDER_TTL_MINUTES`), clamped to Stripe's 30 min – 24 h window.
+
+### VNPay
+- `GET /payments/webhooks/vnpay/ipn` is the source of truth. The signature (HMAC-SHA512 over the sorted, encoded query) is verified first; then the payment is looked up from `vnp_TxnRef` (the payment id without dashes) and the amount compared. Replies use VNPay codes: `00` handled, `01` unknown payment, `02` already handled, `04` wrong amount, `97` bad signature, `99` our error (VNPay retries). IPNs are recorded in `payment_webhook_events` (event id `txnRef:transactionNo:responseCode`) for idempotency.
+- `GET /payments/webhooks/vnpay/return` only redirects the browser to `VNPAY_RESULT_URL?order_id=…&status=success|failed`; it changes nothing.
+- Refunds and status queries use the merchant API, whose responses are signature-checked.
+
+### Late payments
+- Cancelling, expiring or editing an order marks its `pending` payments `failed` (`metadata.failureReason`: `order_cancelled` / `order_expired` / `order_edited`).
+- `failed` is not terminal, so if the gateway still captures the money, completion proceeds (`OrdersService.confirmAfterPayment`):
+  - order `pending` → `confirmed`;
+  - order `cancelled` and the stock can be reserved again → **revived** to `confirmed`, discount uses reinstated (even past their limit — the customer paid the discounted price);
+  - order `cancelled` and the stock is gone → the payment is **refunded in full automatically** and a `late_payment_refunded` issue is raised for customer service (`late_payment_refund_failed` if the refund fails).
+- Admin `PATCH /admin/payments/:id/status` → `completed` on a cancelled order whose stock is gone is rejected.
+- If the captured amount differs from the order's current total, an `amount_mismatch` issue is raised.
+
+### Reconciliation (`PaymentReconciliationService`, every 15 min; `POST /admin/payment-reconciliations`)
+1. `pending`/`failed` online payments with a gateway reference, 10 min – 72 h old, are queried: paid → completed now (with late-payment handling) plus a resolved `webhook_missed` record; failed → failed and not asked again (`reconciledAt`).
+2. `completed` payments paid in the last 7 days are verified once: same amount → `reconciledAt` set; otherwise `amount_mismatch` / `gateway_not_paid` / `gateway_status_unknown`.
+3. Paid payments on cancelled orders raise `paid_on_cancelled_order`.
+
+### COD settlement (`POST /admin/cod-settlements`, `payment.update`)
+- Takes a carrier statement (`reference`, `carrier`, lines of `orderNumber` + remitted `amount`); each line settles in its own transaction.
+- A line settles (COD payment → `completed`, `metadata.codSettlement`) only when the order is `delivered` and the amount matches; otherwise it is left unpaid and raises `cod_not_delivered` / `cod_amount_mismatch`. A later matching statement closes those issues.
+
+### Payment issues (`GET /admin/payment-issues`, `POST /admin/payment-issues/:id/resolve`)
+- At most one open issue per (payment, type); re-raising is a no-op. Resolving requires a note and records who and when.
+
+### Existing rules
 
 - A payment can only be created for an order owned by the requesting user (`order.user_id !== userId` → `403 Forbidden`).
 - A payment cannot be created for an order whose status is `cancelled` or `refunded` (`400 Bad Request`).

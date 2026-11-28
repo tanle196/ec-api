@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Ip,
   Param,
   Post,
   Query,
@@ -41,9 +42,10 @@ export class PaymentsController {
   create(
     @CurrentUser() user: ICurrentUser,
     @Body() dto: CreatePaymentDto,
+    @Ip() clientIp: string,
   ): Promise<PaymentResponseDto> {
     return this.paymentsService
-      .create(user.id!, dto)
+      .create(user.id!, dto, { clientIp })
       .then(PaymentMapper.toResponse);
   }
 

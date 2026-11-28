@@ -3,9 +3,9 @@ import { PaymentMethod } from '../../enums/payment-method.enum';
 import { StripeGatewayProvider } from './stripe-gateway.provider';
 
 describe('StripeGatewayProvider', () => {
-  const buildProvider = (currency = 'vnd') => {
+  const buildProvider = (currency = 'vnd', ttlMinutes = 0) => {
     const client = {
-      checkout: { sessions: { create: jest.fn() } },
+      checkout: { sessions: { create: jest.fn(), retrieve: jest.fn() } },
       paymentIntents: { retrieve: jest.fn() },
       refunds: { create: jest.fn() },
     };
@@ -15,6 +15,7 @@ describe('StripeGatewayProvider', () => {
         checkoutSuccessUrl: 'https://shop.test/checkout/success?ref=stripe',
         checkoutCancelUrl: 'https://shop.test/checkout/cancel',
       }),
+      getAppConfig: () => ({ pendingOrderTtlMinutes: ttlMinutes }),
     };
     const provider = new StripeGatewayProvider(
       { client } as never,
@@ -132,6 +133,102 @@ describe('StripeGatewayProvider', () => {
         ),
       ).rejects.toThrow(BadRequestException);
       expect(client.refunds.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('session expiry', () => {
+    const expiresAt = async (ttl: number, orderCreatedAt: Date) => {
+      const { provider, client } = buildProvider('vnd', ttl);
+      client.checkout.sessions.create.mockResolvedValue({ id: 'cs', url: 'u' });
+      await provider.initiate(
+        payment as never,
+        { ...order, createdAt: orderCreatedAt } as never,
+      );
+      return (
+        client.checkout.sessions.create.mock.calls as {
+          expires_at?: number;
+        }[][]
+      )[0][0].expires_at;
+    };
+
+    beforeEach(() =>
+      jest.useFakeTimers({ now: new Date('2026-11-28T10:00:00Z') }),
+    );
+    afterEach(() => jest.useRealTimers());
+
+    it('ends the session when the order hold ends', async () => {
+      // Order placed 0 min ago, 60 min hold.
+      expect(await expiresAt(60, new Date('2026-11-28T10:00:00Z'))).toBe(
+        Date.parse('2026-11-28T11:00:00Z') / 1000,
+      );
+    });
+
+    it("never goes below Stripe's 30 minute minimum", async () => {
+      expect(await expiresAt(30, new Date('2026-11-28T09:50:00Z'))).toBe(
+        Date.parse('2026-11-28T10:31:00Z') / 1000,
+      );
+    });
+
+    it("leaves Stripe's default when order expiry is off", async () => {
+      expect(await expiresAt(0, new Date())).toBeUndefined();
+    });
+  });
+
+  describe('queryStatus', () => {
+    it('reads a paid checkout session', async () => {
+      const { provider, client } = buildProvider();
+      client.checkout.sessions.retrieve.mockResolvedValue({
+        payment_status: 'paid',
+        status: 'complete',
+        payment_intent: 'pi_9',
+        amount_total: 150000,
+        currency: 'vnd',
+      });
+
+      await expect(
+        provider.queryStatus({ transactionId: 'cs_1' } as never),
+      ).resolves.toEqual(
+        expect.objectContaining({
+          status: 'paid',
+          amount: 150000,
+          transactionId: 'pi_9',
+        }),
+      );
+    });
+
+    it('treats an expired session as failed', async () => {
+      const { provider, client } = buildProvider();
+      client.checkout.sessions.retrieve.mockResolvedValue({
+        payment_status: 'unpaid',
+        status: 'expired',
+      });
+
+      await expect(
+        provider.queryStatus({ transactionId: 'cs_1' } as never),
+      ).resolves.toEqual(expect.objectContaining({ status: 'failed' }));
+    });
+
+    it('reads a payment intent', async () => {
+      const { provider, client } = buildProvider();
+      client.paymentIntents.retrieve.mockResolvedValue({
+        id: 'pi_1',
+        status: 'succeeded',
+        amount_received: 150000,
+        currency: 'vnd',
+      });
+
+      await expect(
+        provider.queryStatus({ transactionId: 'pi_1' } as never),
+      ).resolves.toEqual(
+        expect.objectContaining({ status: 'paid', amount: 150000 }),
+      );
+    });
+
+    it('cannot say anything without a reference', async () => {
+      const { provider } = buildProvider();
+      await expect(
+        provider.queryStatus({ transactionId: null } as never),
+      ).resolves.toEqual({ status: 'unknown' });
     });
   });
 });

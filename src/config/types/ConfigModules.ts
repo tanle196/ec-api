@@ -6,6 +6,7 @@ export const ConfigModules = {
   Mail: 'mail',
   Media: 'media',
   Stripe: 'stripe',
+  Vnpay: 'vnpay',
 } as const;
 
 export type ConfigModulesType =

@@ -551,4 +551,28 @@ describe('DiscountsService', () => {
       expect(manager.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
+
+  it('reinstateForOrder counts released uses again, even past the limit', async () => {
+    const { service } = buildService();
+    const { manager } = buildManager(1);
+    const increment = jest.fn().mockResolvedValue(undefined);
+    Object.assign(manager, { increment });
+    manager.find.mockResolvedValue([{ id: 'r-1', discount_id: 'd-1' }]);
+
+    await service.reinstateForOrder(manager as never, 'order-1');
+
+    expect(manager.find).toHaveBeenCalledWith(expect.anything(), {
+      where: { order_id: 'order-1', status: 'released' },
+    });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'r-1', {
+      status: 'active',
+      releasedAt: null,
+    });
+    expect(increment).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: 'd-1' },
+      'usedCount',
+      1,
+    );
+  });
 });

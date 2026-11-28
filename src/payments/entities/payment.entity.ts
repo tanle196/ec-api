@@ -40,4 +40,9 @@ export class Payment extends AbstractBaseEntity {
 
   @Column({ type: 'timestamp', nullable: true })
   paidAt!: Date | null;
+
+  // When reconciliation confirmed the gateway agrees this payment was paid
+  // in full. Null until checked (and for offline methods).
+  @Column({ type: 'timestamptz', nullable: true })
+  reconciledAt!: Date | null;
 }

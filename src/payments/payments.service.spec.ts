@@ -2,6 +2,7 @@ import { PaymentPolicy } from './policies/payment.policy';
 import { OrderStatusChangeActor } from '@/orders/enums/order-status-change-actor.enum';
 import { OrderStatus } from '@/orders/enums/order-status.enum';
 import { PaymentsService } from './payments.service';
+import { PaymentIssueType } from './enums/payment-issue-type.enum';
 import { PaymentMethod } from './enums/payment-method.enum';
 import { PaymentStatus } from './enums/payment-status.enum';
 import { RefundStatus } from './enums/refund-status.enum';
@@ -17,6 +18,7 @@ describe('PaymentsService', () => {
 
   const buildService = (overrides?: {
     provider?: { initiate: jest.Mock } | undefined;
+    codMaxOrderTotal?: number;
   }) => {
     // A single fake EntityManager shared by every `dataSource.transaction`
     // call, since the service now does its reads/writes through the
@@ -49,6 +51,7 @@ describe('PaymentsService', () => {
       }),
     };
     const dataSource = {
+      manager,
       transaction: jest
         .fn()
         .mockImplementation((cb: (m: unknown) => Promise<unknown>) =>
@@ -65,7 +68,21 @@ describe('PaymentsService', () => {
     };
     const ordersService = {
       applyStatusChange: jest.fn().mockResolvedValue(null),
+      confirmAfterPayment: jest.fn().mockResolvedValue({
+        outcome: 'confirmed',
+        order: { id: 'order-1', status: OrderStatus.CONFIRMED, total: 100000 },
+        fromStatus: OrderStatus.PENDING,
+      }),
       notifyOrderStatusChanged: jest.fn(),
+    };
+    const issuesService = {
+      raise: jest.fn().mockResolvedValue(undefined),
+      resolveOpen: jest.fn().mockResolvedValue(undefined),
+    };
+    const configService = {
+      getAppConfig: () => ({
+        codMaxOrderTotal: overrides?.codMaxOrderTotal ?? 0,
+      }),
     };
     const gatewayRegistry = {
       resolve: jest.fn().mockReturnValue(overrides?.provider),
@@ -78,10 +95,13 @@ describe('PaymentsService', () => {
       ordersService as never,
       gatewayRegistry as never,
       new PaymentPolicy(),
+      issuesService as never,
+      configService as never,
     );
 
     return {
       service,
+      issuesService,
       manager,
       getRawOne,
       dataSource,
@@ -109,6 +129,57 @@ describe('PaymentsService', () => {
       expect(manager.save).toHaveBeenCalledTimes(1);
     });
 
+    it('rejects an online method that has no gateway configured', async () => {
+      const { service, dataSource } = buildService({ provider: undefined });
+
+      await expect(
+        service.create('user-1', {
+          order_id: 'order-1',
+          method: PaymentMethod.VNPAY,
+        }),
+      ).rejects.toThrow('Payment method "vnpay" is not available');
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects cash on delivery above the configured limit', async () => {
+      const { service, manager } = buildService({ codMaxOrderTotal: 50000 });
+      manager.findOne.mockResolvedValueOnce(order);
+
+      await expect(
+        service.create('user-1', {
+          order_id: 'order-1',
+          method: PaymentMethod.COD,
+        }),
+      ).rejects.toThrow(
+        'Cash on delivery is only available for orders up to 50000',
+      );
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('keeps the metadata a gateway returns and passes the client context', async () => {
+      const initiate = jest.fn().mockResolvedValue({
+        providerRef: 'ref',
+        redirectUrl: 'https://pay',
+        metadata: { vnpCreateDate: '20261128100000' },
+      });
+      const { service, manager } = buildService({ provider: { initiate } });
+      manager.findOne.mockResolvedValueOnce(order).mockResolvedValueOnce(null);
+
+      const payment = await service.create(
+        'user-1',
+        { order_id: 'order-1', method: PaymentMethod.VNPAY },
+        { clientIp: '1.2.3.4' },
+      );
+
+      expect(initiate).toHaveBeenCalledWith(expect.anything(), order, {
+        clientIp: '1.2.3.4',
+      });
+      expect(payment.metadata).toEqual({
+        vnpCreateDate: '20261128100000',
+        checkoutUrl: 'https://pay',
+      });
+    });
+
     it('initiates the gateway and persists the providerRef + checkoutUrl when a provider resolves', async () => {
       const initiate = jest.fn().mockResolvedValue({
         providerRef: 'cs_test_123',
@@ -129,6 +200,7 @@ describe('PaymentsService', () => {
       expect(initiate).toHaveBeenCalledWith(
         expect.objectContaining({ order_id: 'order-1' }),
         order,
+        {},
       );
       expect(payment.transactionId).toBe('cs_test_123');
       expect(payment.metadata).toEqual({
@@ -197,9 +269,14 @@ describe('PaymentsService', () => {
     });
 
     it('completes the payment, confirms the order via SYSTEM actor, and notifies once the transaction has committed', async () => {
-      const { service, manager, ordersService } = buildService();
-      const updatedOrder = { id: 'order-1', status: OrderStatus.CONFIRMED };
-      ordersService.applyStatusChange.mockResolvedValue({
+      const { service, manager, ordersService, issuesService } = buildService();
+      const updatedOrder = {
+        id: 'order-1',
+        status: OrderStatus.CONFIRMED,
+        total: 100000,
+      };
+      ordersService.confirmAfterPayment.mockResolvedValue({
+        outcome: 'confirmed',
         order: updatedOrder,
         fromStatus: OrderStatus.PENDING,
       });
@@ -207,6 +284,8 @@ describe('PaymentsService', () => {
         id: 'payment-1',
         order_id: 'order-1',
         status: PaymentStatus.PENDING,
+        amount: 100000,
+        metadata: { vnpCreateDate: '20261128100000' },
       });
 
       const outcome = await service.completeFromGatewayEvent(
@@ -214,6 +293,7 @@ describe('PaymentsService', () => {
         'pi_123',
         { foo: 'bar' },
         'Stripe webhook evt_1: checkout completed',
+        100000,
       );
 
       expect(outcome).toBe('processed');
@@ -222,17 +302,19 @@ describe('PaymentsService', () => {
         expect.objectContaining({
           status: PaymentStatus.COMPLETED,
           transactionId: 'pi_123',
+          // Merged: what the gateway stored at initiation is kept.
+          metadata: { vnpCreateDate: '20261128100000', foo: 'bar' },
         }),
       );
-      expect(ordersService.applyStatusChange).toHaveBeenCalledWith(
+      expect(ordersService.confirmAfterPayment).toHaveBeenCalledWith(
         'order-1',
-        OrderStatus.CONFIRMED,
         {
           actorType: OrderStatusChangeActor.SYSTEM,
           note: 'Stripe webhook evt_1: checkout completed',
         },
         manager,
       );
+      expect(issuesService.raise).not.toHaveBeenCalled();
       // Fired via the dedicated post-commit hook, not from inside the
       // transaction callback — see notifyOrderStatusChanged's doc comment.
       expect(ordersService.notifyOrderStatusChanged).toHaveBeenCalledWith(
@@ -248,10 +330,6 @@ describe('PaymentsService', () => {
       // fail and roll everything back — emailing a change that never
       // actually persisted.
       const { service, manager, ordersService } = buildService();
-      ordersService.applyStatusChange.mockResolvedValue({
-        order: { id: 'order-1', status: OrderStatus.CONFIRMED },
-        fromStatus: OrderStatus.PENDING,
-      });
       manager.findOne.mockResolvedValueOnce({
         id: 'payment-1',
         order_id: 'order-1',
@@ -264,6 +342,235 @@ describe('PaymentsService', () => {
       ).rejects.toThrow('db exploded');
 
       expect(ordersService.notifyOrderStatusChanged).not.toHaveBeenCalled();
+    });
+
+    it('completes a payment we had voided (late payment) instead of ignoring it', async () => {
+      const { service, manager, ordersService } = buildService();
+      manager.findOne.mockResolvedValueOnce({
+        id: 'payment-1',
+        order_id: 'order-1',
+        status: PaymentStatus.FAILED,
+        amount: 100000,
+      });
+
+      await expect(
+        service.completeFromGatewayEvent('payment-1', 'pi_1', {}, 'late'),
+      ).resolves.toBe('processed');
+      expect(ordersService.confirmAfterPayment).toHaveBeenCalled();
+    });
+
+    it('raises an issue when the captured amount differs from the order total', async () => {
+      const { service, manager, issuesService } = buildService();
+      manager.findOne.mockResolvedValueOnce({
+        id: 'payment-1',
+        order_id: 'order-1',
+        status: PaymentStatus.PENDING,
+        method: PaymentMethod.STRIPE,
+        amount: 90000,
+      });
+
+      await service.completeFromGatewayEvent(
+        'payment-1',
+        'pi_1',
+        {},
+        'paid',
+        90000,
+      );
+
+      expect(issuesService.raise).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: PaymentIssueType.AMOUNT_MISMATCH,
+          paymentId: 'payment-1',
+          details: { captured: 90000, orderTotal: 100000 },
+        }),
+      );
+    });
+
+    describe('when the order was cancelled and the stock is gone', () => {
+      const setup = () => {
+        const ctx = buildService();
+        ctx.ordersService.confirmAfterPayment.mockResolvedValue({
+          outcome: 'not_revivable',
+          order: {
+            id: 'order-1',
+            status: OrderStatus.CANCELLED,
+            total: 100000,
+          },
+          fromStatus: null,
+        });
+        ctx.manager.findOne.mockResolvedValueOnce({
+          id: 'payment-1',
+          order_id: 'order-1',
+          status: PaymentStatus.FAILED,
+          method: PaymentMethod.STRIPE,
+          amount: 100000,
+        });
+        ctx.manager.find.mockResolvedValueOnce([{ id: 'item-1', quantity: 2 }]);
+        const createRefund = jest.spyOn(ctx.service, 'createRefund');
+        return { ...ctx, createRefund };
+      };
+
+      it('refunds every item in full and flags it for customer service', async () => {
+        const { service, issuesService, createRefund } = setup();
+        createRefund.mockResolvedValue({
+          id: 'refund-1',
+          amount: 100000,
+        } as never);
+
+        await service.completeFromGatewayEvent('payment-1', 'pi_1', {}, 'late');
+
+        expect(createRefund).toHaveBeenCalledWith('payment-1', {
+          items: [{ order_item_id: 'item-1', quantity: 2 }],
+          reason: expect.stringContaining(
+            'after the order was cancelled',
+          ) as unknown,
+        });
+        expect(issuesService.raise).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: PaymentIssueType.LATE_PAYMENT_REFUNDED,
+            details: { refundId: 'refund-1', amount: 100000 },
+          }),
+        );
+      });
+
+      it('raises a hand-refund issue when the automatic refund fails', async () => {
+        const { service, issuesService, createRefund } = setup();
+        createRefund.mockRejectedValue(new Error('gateway down'));
+        jest
+          .spyOn(service['logger'], 'error')
+          .mockImplementation(() => undefined);
+
+        await expect(
+          service.completeFromGatewayEvent('payment-1', 'pi_1', {}, 'late'),
+        ).resolves.toBe('processed');
+        expect(issuesService.raise).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: PaymentIssueType.LATE_PAYMENT_REFUND_FAILED,
+            details: { error: 'gateway down' },
+          }),
+        );
+      });
+    });
+  });
+
+  describe('settleCod', () => {
+    const dto = {
+      reference: 'GHN-DS-1',
+      carrier: 'GHN',
+      lines: [{ orderNumber: 'ORD-1', amount: 100000 }],
+    };
+    const codPayment = (overrides: object = {}) => ({
+      id: 'payment-1',
+      order_id: 'order-1',
+      method: PaymentMethod.COD,
+      status: PaymentStatus.PENDING,
+      amount: 100000,
+      ...overrides,
+    });
+
+    it("marks a delivered order's COD payment paid", async () => {
+      const { service, manager, issuesService } = buildService();
+      manager.findOne
+        .mockResolvedValueOnce({ ...order, status: OrderStatus.DELIVERED })
+        .mockResolvedValueOnce(codPayment())
+        .mockResolvedValueOnce(codPayment()); // locked
+
+      const summary = await service.settleCod(dto, 'admin-1');
+
+      expect(summary).toEqual(
+        expect.objectContaining({ settled: 1, needsAttention: 0 }),
+      );
+      expect(issuesService.resolveOpen).toHaveBeenCalledWith(
+        'payment-1',
+        [
+          PaymentIssueType.COD_AMOUNT_MISMATCH,
+          PaymentIssueType.COD_NOT_DELIVERED,
+        ],
+        'Settled by COD statement GHN-DS-1',
+        'admin-1',
+        manager,
+      );
+      expect(manager.save).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          status: PaymentStatus.COMPLETED,
+          metadata: {
+            codSettlement: expect.objectContaining({
+              reference: 'GHN-DS-1',
+              carrier: 'GHN',
+              amount: 100000,
+              settledBy: 'admin-1',
+            }) as unknown,
+          },
+        }),
+      );
+    });
+
+    it.each([
+      [
+        'amount_mismatch',
+        OrderStatus.DELIVERED,
+        90000,
+        PaymentIssueType.COD_AMOUNT_MISMATCH,
+      ],
+      [
+        'not_delivered',
+        OrderStatus.SHIPPED,
+        100000,
+        PaymentIssueType.COD_NOT_DELIVERED,
+      ],
+    ])(
+      'leaves %s lines unpaid and raises an issue',
+      async (result, orderStatus, amount, issueType) => {
+        const { service, manager, issuesService } = buildService();
+        manager.findOne
+          .mockResolvedValueOnce({ ...order, status: orderStatus })
+          .mockResolvedValueOnce(codPayment())
+          .mockResolvedValueOnce(codPayment());
+
+        const summary = await service.settleCod(
+          { ...dto, lines: [{ orderNumber: 'ORD-1', amount }] },
+          'admin-1',
+        );
+
+        expect(summary.lines[0].result).toBe(result);
+        expect(summary.needsAttention).toBe(1);
+        expect(manager.save).not.toHaveBeenCalled();
+        expect(issuesService.raise).toHaveBeenCalledWith(
+          expect.objectContaining({ type: issueType, paymentId: 'payment-1' }),
+          manager,
+        );
+      },
+    );
+
+    it('reports unknown orders, missing COD payments and repeats', async () => {
+      const { service, manager } = buildService();
+      manager.findOne
+        .mockResolvedValueOnce(null) // ORD-X: no order
+        .mockResolvedValueOnce(order) // ORD-2: order, no COD payment
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(order) // ORD-3: already settled
+        .mockResolvedValueOnce(codPayment({ status: PaymentStatus.COMPLETED }))
+        .mockResolvedValueOnce(codPayment({ status: PaymentStatus.COMPLETED }));
+
+      const summary = await service.settleCod(
+        {
+          reference: 'R',
+          lines: [
+            { orderNumber: 'ORD-X', amount: 1 },
+            { orderNumber: 'ORD-2', amount: 1 },
+            { orderNumber: 'ORD-3', amount: 1 },
+          ],
+        },
+        'admin-1',
+      );
+
+      expect(summary.lines.map((l) => l.result)).toEqual([
+        'order_not_found',
+        'no_cod_payment',
+        'already_settled',
+      ]);
+      expect(summary.needsAttention).toBe(2);
     });
   });
 
@@ -310,7 +617,8 @@ describe('PaymentsService', () => {
     it('completes the payment, confirms the order, and notifies after commit', async () => {
       const { service, manager, ordersService } = buildService();
       const updatedOrder = { id: 'order-1', status: OrderStatus.CONFIRMED };
-      ordersService.applyStatusChange.mockResolvedValue({
+      ordersService.confirmAfterPayment.mockResolvedValue({
+        outcome: 'confirmed',
         order: updatedOrder,
         fromStatus: OrderStatus.PENDING,
       });
@@ -328,9 +636,8 @@ describe('PaymentsService', () => {
 
       expect(payment.status).toBe(PaymentStatus.COMPLETED);
       expect(payment.paidAt).toBeInstanceOf(Date);
-      expect(ordersService.applyStatusChange).toHaveBeenCalledWith(
+      expect(ordersService.confirmAfterPayment).toHaveBeenCalledWith(
         'order-1',
-        OrderStatus.CONFIRMED,
         {
           actorType: OrderStatusChangeActor.ADMIN,
           actorId: 'admin-1',
@@ -342,6 +649,24 @@ describe('PaymentsService', () => {
         updatedOrder,
         OrderStatus.PENDING,
       );
+    });
+
+    it('refuses to mark paid a cancelled order whose stock is gone', async () => {
+      const { service, manager, ordersService } = buildService();
+      ordersService.confirmAfterPayment.mockResolvedValue({
+        outcome: 'not_revivable',
+        order: { id: 'order-1', status: OrderStatus.CANCELLED },
+        fromStatus: null,
+      });
+      manager.findOne.mockResolvedValueOnce({
+        id: 'payment-1',
+        order_id: 'order-1',
+        status: PaymentStatus.FAILED,
+      });
+
+      await expect(
+        service.updateStatus('payment-1', { status: PaymentStatus.COMPLETED }),
+      ).rejects.toThrow('cannot be marked paid');
     });
 
     it('does not touch the order or notify for a status change with no order side effect', async () => {

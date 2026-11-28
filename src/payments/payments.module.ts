@@ -4,6 +4,7 @@ import { Order } from '@/orders/entities/order.entity';
 import { OrdersModule } from '@/orders/orders.module';
 import { UsersModule } from '@/users/users.module';
 import { MailModule } from '@/mail/mail.module';
+import { PaymentIssue } from './entities/payment-issue.entity';
 import { PaymentWebhookEvent } from './entities/payment-webhook-event.entity';
 import { Payment } from './entities/payment.entity';
 import { Refund } from './entities/refund.entity';
@@ -15,6 +16,11 @@ import { PAYMENT_GATEWAY_PROVIDERS } from './gateways/tokens';
 import { StripeClientProvider } from './gateways/stripe/stripe-client.provider';
 import { StripeGatewayProvider } from './gateways/stripe/stripe-gateway.provider';
 import { StripeWebhookVerifierService } from './gateways/stripe/stripe-webhook-verifier.service';
+import { VnpayGatewayProvider } from './gateways/vnpay/vnpay-gateway.provider';
+import { VnpayIpnService } from './gateways/vnpay/vnpay-ipn.service';
+import { AdminPaymentOperationsController } from './admin-payment-operations.controller';
+import { PaymentIssuesService } from './payment-issues.service';
+import { PaymentReconciliationService } from './payment-reconciliation.service';
 import { PaymentsController } from './payments.controller';
 import { PaymentWebhooksController } from './payment-webhooks.controller';
 import { AdminPaymentsController } from './admin-payments.controller';
@@ -32,6 +38,7 @@ import { RefundRequestPolicy } from './policies/refund-request.policy';
       Payment,
       Order,
       PaymentWebhookEvent,
+      PaymentIssue,
       Refund,
       RefundItem,
       RefundRequest,
@@ -47,6 +54,7 @@ import { RefundRequestPolicy } from './policies/refund-request.policy';
     PaymentWebhooksController,
     RefundRequestsController,
     AdminRefundRequestsController,
+    AdminPaymentOperationsController,
   ],
   providers: [
     PaymentsService,
@@ -58,12 +66,18 @@ import { RefundRequestPolicy } from './policies/refund-request.policy';
     StripeClientProvider,
     StripeGatewayProvider,
     StripeWebhookVerifierService,
+    VnpayGatewayProvider,
+    VnpayIpnService,
+    PaymentIssuesService,
+    PaymentReconciliationService,
     {
       provide: PAYMENT_GATEWAY_PROVIDERS,
-      useFactory: (stripeGatewayProvider: StripeGatewayProvider) => [
-        stripeGatewayProvider,
-      ],
-      inject: [StripeGatewayProvider],
+      // VNPay is only offered once its merchant credentials are configured.
+      useFactory: (
+        stripe: StripeGatewayProvider,
+        vnpay: VnpayGatewayProvider,
+      ) => (vnpay.isConfigured() ? [stripe, vnpay] : [stripe]),
+      inject: [StripeGatewayProvider, VnpayGatewayProvider],
     },
   ],
   exports: [PaymentsService],

@@ -1,4 +1,12 @@
-import { BadRequestException, Controller, Post, Req } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Redirect,
+  Req,
+} from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -6,6 +14,11 @@ import type { Request } from 'express';
 import { PaymentMethod } from './enums/payment-method.enum';
 import { WebhookProcessingStatus } from './enums/webhook-processing-status.enum';
 import { StripeWebhookVerifierService } from './gateways/stripe/stripe-webhook-verifier.service';
+import {
+  VnpayIpnResponse,
+  VnpayIpnService,
+} from './gateways/vnpay/vnpay-ipn.service';
+import { fromStripeAmount } from './gateways/stripe/stripe-currency.util';
 import { PaymentWebhooksService } from './payment-webhooks.service';
 import { PaymentsService } from './payments.service';
 
@@ -17,7 +30,28 @@ export class PaymentWebhooksController {
     private readonly stripeWebhookVerifier: StripeWebhookVerifierService,
     private readonly paymentWebhooksService: PaymentWebhooksService,
     private readonly paymentsService: PaymentsService,
+    private readonly vnpayIpnService: VnpayIpnService,
   ) {}
+
+  // VNPay calls this server-to-server with the signed result as a query
+  // string and expects VNPay's JSON reply format back, always with 200.
+  @Get('vnpay/ipn')
+  vnpayIpn(@Query() query: Record<string, string>): Promise<VnpayIpnResponse> {
+    return this.vnpayIpnService.handleIpn(query);
+  }
+
+  // The customer's browser comes back here from VNPay; send it on to the
+  // storefront result page.
+  @Get('vnpay/return')
+  @Redirect()
+  async vnpayReturn(
+    @Query() query: Record<string, string>,
+  ): Promise<{ url: string; statusCode: number }> {
+    return {
+      url: await this.vnpayIpnService.resolveReturnUrl(query),
+      statusCode: 302,
+    };
+  }
 
   @Post('stripe')
   async handleStripe(
@@ -99,6 +133,9 @@ export class PaymentWebhooksController {
           paymentIntentId,
           session as unknown as Record<string, unknown>,
           `Stripe webhook ${event.id}: checkout completed`,
+          typeof session.amount_total === 'number'
+            ? fromStripeAmount(session.amount_total, session.currency ?? '')
+            : undefined,
         );
         if (outcome === 'not_found') {
           await this.paymentWebhooksService.markError(

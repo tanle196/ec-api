@@ -55,7 +55,9 @@ describe('Payment controllers', () => {
     it('scopes every call to the current user', async () => {
       const dto = { order_id: 'o' };
 
-      await expect(controller.create(user, dto as never)).resolves.toEqual({
+      await expect(
+        controller.create(user, dto as never, '1.2.3.4'),
+      ).resolves.toEqual({
         public: 'create',
       });
       await expect(controller.findMine(user, { page: 1 })).resolves.toEqual({
@@ -68,7 +70,9 @@ describe('Payment controllers', () => {
         public: 'findOne',
       });
 
-      expect(service.create).toHaveBeenCalledWith('user-1', dto);
+      expect(service.create).toHaveBeenCalledWith('user-1', dto, {
+        clientIp: '1.2.3.4',
+      });
       expect(service.findAll).toHaveBeenCalledWith(
         { page: 1 },
         'user-1',

@@ -15,6 +15,8 @@ import { OrdersService } from '@/orders/orders.service';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { toMoney } from '@/common/utils/money.util';
 import { OrderItem } from '@/orders/entities/order-item.entity';
+import { TypedConfigService } from '@/config/TypedConfigService';
+import { CodSettlementDto } from './dto/cod-settlement.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { CreateRefundDto } from './dto/create-refund.dto';
 import { PaymentQueryDto } from './dto/payment-query.dto';
@@ -23,12 +25,35 @@ import { Payment } from './entities/payment.entity';
 import { Refund } from './entities/refund.entity';
 import { RefundItem } from './entities/refund-item.entity';
 import { PaymentStatus } from './enums/payment-status.enum';
+import { PaymentIssueType } from './enums/payment-issue-type.enum';
+import { PaymentMethod } from './enums/payment-method.enum';
 import { RefundStatus } from './enums/refund-status.enum';
+import { PaymentInitiationContext } from './gateways/payment-gateway.interface';
 import { PaymentGatewayRegistry } from './gateways/payment-gateway.registry';
 import { fromStripeAmount } from './gateways/stripe/stripe-currency.util';
+import { PaymentIssuesService } from './payment-issues.service';
 import { PaymentPolicy } from './policies/payment.policy';
 
 type GatewayEventOutcome = 'processed' | 'already_terminal' | 'not_found';
+
+export type CodSettlementResult =
+  | 'settled'
+  | 'already_settled'
+  | 'amount_mismatch'
+  | 'not_delivered'
+  | 'no_cod_payment'
+  | 'order_not_found';
+
+export interface CodSettlementSummary {
+  reference: string;
+  settled: number;
+  needsAttention: number;
+  lines: {
+    orderNumber: string;
+    result: CodSettlementResult;
+    message?: string;
+  }[];
+}
 
 // Captured from applyStatusChange(..., manager) so the resulting
 // status-change email can be sent after our own transaction has committed,
@@ -63,9 +88,18 @@ export class PaymentsService {
     private readonly ordersService: OrdersService,
     private readonly gatewayRegistry: PaymentGatewayRegistry,
     private readonly paymentPolicy: PaymentPolicy,
+    private readonly issuesService: PaymentIssuesService,
+    private readonly configService: TypedConfigService,
   ) {}
 
-  async create(userId: string, dto: CreatePaymentDto): Promise<Payment> {
+  async create(
+    userId: string,
+    dto: CreatePaymentDto,
+    context: PaymentInitiationContext = {},
+  ): Promise<Payment> {
+    const provider = this.gatewayRegistry.resolve(dto.method);
+    this.paymentPolicy.assertMethodAvailable(dto.method, Boolean(provider));
+
     // Lock the order row for the duration of the "any active payment
     // already exists?" check and the insert that follows, so two concurrent
     // create() calls for the same order (double-click, retried request)
@@ -82,6 +116,12 @@ export class PaymentsService {
         if (!order) throw new NotFoundException('Order not found');
         this.paymentPolicy.assertOrderOwnedBy(order, userId);
         this.paymentPolicy.assertOrderPayable(order);
+        if (dto.method === PaymentMethod.COD) {
+          this.paymentPolicy.assertCodAllowed(
+            order,
+            this.configService.getAppConfig().codMaxOrderTotal,
+          );
+        }
 
         // PARTIALLY_REFUNDED is included alongside PENDING/COMPLETED: it's
         // still the order's "active" payment (money was collected, only
@@ -118,14 +158,14 @@ export class PaymentsService {
       },
     );
 
-    const provider = this.gatewayRegistry.resolve(dto.method);
     if (!provider) return payment;
 
     try {
-      const result = await provider.initiate(payment, order);
+      const result = await provider.initiate(payment, order, context);
       payment.transactionId = result.providerRef;
       payment.metadata = {
         ...(payment.metadata ?? {}),
+        ...(result.metadata ?? {}),
         checkoutUrl: result.redirectUrl ?? null,
       };
 
@@ -226,57 +266,118 @@ export class PaymentsService {
 
       if (dto.status === PaymentStatus.COMPLETED) {
         payment.paidAt = new Date();
-        orderNotify = await this.ordersService.applyStatusChange(
-          payment.order_id,
-          OrderStatus.CONFIRMED,
-          {
-            actorType: OrderStatusChangeActor.ADMIN,
-            actorId,
-            note: 'Payment completed',
-          },
-          manager,
-        );
+        const { outcome, order, fromStatus } =
+          await this.ordersService.confirmAfterPayment(
+            payment.order_id,
+            {
+              actorType: OrderStatusChangeActor.ADMIN,
+              actorId,
+              note: 'Payment completed',
+            },
+            manager,
+          );
+        // A person marking it paid can refund it themselves; don't record
+        // money against an order we can no longer fulfil.
+        this.paymentPolicy.assertOrderFulfillable(outcome);
+        orderNotify = { order, fromStatus };
       }
 
       return { result: await manager.save(Payment, payment), orderNotify };
     });
   }
 
+  /**
+   * The gateway captured the money. Marks the payment COMPLETED and moves
+   * the order on (confirmAfterPayment). Two cases need more than that and
+   * are handled after the commit:
+   * - The order was cancelled (expired, or cancelled by the customer) and
+   *   its stock is gone: the money is refunded in full automatically and an
+   *   issue is raised so someone tells the customer.
+   * - The gateway captured a different amount than the order now costs
+   *   (`capturedAmount`, when the gateway reports it): an issue is raised.
+   */
   async completeFromGatewayEvent(
     paymentId: string,
     transactionId: string,
     metadata: Record<string, unknown>,
     note: string,
+    capturedAmount?: number,
   ): Promise<GatewayEventOutcome> {
-    // Locked read-check-write: Stripe can redeliver or race webhook events,
-    // so without a lock a delayed/duplicate event could interleave with
-    // another one on the same payment (e.g. a stale "failed" event landing
-    // after this "completed" one already committed) and both would read the
-    // same pre-update status and pass the terminal-status check. Folding the
-    // order sync into the same transaction also keeps payment and order
-    // status from diverging if applyStatusChange throws.
-    return this.commitAndNotify<GatewayEventOutcome>(async (manager) => {
+    // Locked read-check-write: gateways can redeliver or race webhook
+    // events, so without a lock a delayed/duplicate event could interleave
+    // with another one on the same payment and both would read the same
+    // pre-update status. Folding the order sync into the same transaction
+    // also keeps payment and order status from diverging.
+    const { outcome, followUp } = await this.commitAndNotify<{
+      outcome: GatewayEventOutcome;
+      followUp: {
+        payment: Payment;
+        orderTotal: number;
+        needsRefund: boolean;
+      } | null;
+    }>(async (manager) => {
       const payment = await this.lockPayment(manager, paymentId);
-      if (!payment) return { result: 'not_found', orderNotify: null };
+      if (!payment) {
+        return {
+          result: { outcome: 'not_found', followUp: null },
+          orderNotify: null,
+        };
+      }
       if (this.paymentPolicy.isTerminal(payment.status)) {
-        return { result: 'already_terminal', orderNotify: null };
+        return {
+          result: { outcome: 'already_terminal', followUp: null },
+          orderNotify: null,
+        };
       }
 
+      // Merged, not replaced: gateways keep data here that later calls
+      // need (e.g. VNPay's transaction date for refunds).
       payment.status = PaymentStatus.COMPLETED;
       payment.transactionId = transactionId;
-      payment.metadata = metadata;
+      payment.metadata = { ...(payment.metadata ?? {}), ...metadata };
       payment.paidAt = new Date();
       await manager.save(Payment, payment);
 
-      const orderNotify = await this.ordersService.applyStatusChange(
+      const confirmed = await this.ordersService.confirmAfterPayment(
         payment.order_id,
-        OrderStatus.CONFIRMED,
         { actorType: OrderStatusChangeActor.SYSTEM, note },
         manager,
       );
 
-      return { result: 'processed', orderNotify };
+      return {
+        result: {
+          outcome: 'processed',
+          followUp: {
+            payment,
+            orderTotal: Number(confirmed.order.total),
+            needsRefund: confirmed.outcome === 'not_revivable',
+          },
+        },
+        orderNotify: {
+          order: confirmed.order,
+          fromStatus: confirmed.fromStatus,
+        },
+      };
     });
+
+    if (followUp) {
+      const captured = capturedAmount ?? Number(followUp.payment.amount);
+      if (!this.paymentPolicy.amountsMatch(captured, followUp.orderTotal)) {
+        await this.issuesService.raise({
+          type: PaymentIssueType.AMOUNT_MISMATCH,
+          paymentId,
+          orderId: followUp.payment.order_id,
+          method: followUp.payment.method,
+          summary: `Gateway captured ${captured}, order total is ${followUp.orderTotal}`,
+          details: { captured, orderTotal: followUp.orderTotal },
+        });
+      }
+      if (followUp.needsRefund) {
+        await this.refundLatePayment(followUp.payment);
+      }
+    }
+
+    return outcome;
   }
 
   async failFromGatewayEvent(
@@ -295,7 +396,7 @@ export class PaymentsService {
       }
 
       payment.status = PaymentStatus.FAILED;
-      payment.metadata = metadata;
+      payment.metadata = { ...(payment.metadata ?? {}), ...metadata };
       await manager.save(Payment, payment);
 
       return 'processed';
@@ -616,6 +717,173 @@ export class PaymentsService {
     });
     if (!created) throw new NotFoundException('Refund not found');
     return created;
+  }
+
+  /**
+   * Books a carrier's COD remittance statement. Each line is settled in its
+   * own transaction, so one bad line doesn't hold back the rest; lines that
+   * don't add up are left unpaid and raised as issues.
+   */
+  async settleCod(
+    dto: CodSettlementDto,
+    actorId: string,
+  ): Promise<CodSettlementSummary> {
+    const lines: CodSettlementSummary['lines'] = [];
+
+    for (const line of dto.lines) {
+      const { result, message } = await this.settleCodLine(line, dto, actorId);
+      lines.push({ orderNumber: line.orderNumber, result, message });
+    }
+
+    return {
+      reference: dto.reference,
+      settled: lines.filter((l) => l.result === 'settled').length,
+      needsAttention: lines.filter(
+        (l) => !['settled', 'already_settled'].includes(l.result),
+      ).length,
+      lines,
+    };
+  }
+
+  private async settleCodLine(
+    line: CodSettlementDto['lines'][number],
+    dto: CodSettlementDto,
+    actorId: string,
+  ): Promise<{ result: CodSettlementResult; message?: string }> {
+    return this.dataSource.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { orderNumber: line.orderNumber },
+      });
+      if (!order) return { result: 'order_not_found' as const };
+
+      const candidate = await manager.findOne(Payment, {
+        where: [
+          {
+            order_id: order.id,
+            method: PaymentMethod.COD,
+            status: PaymentStatus.PENDING,
+          },
+          {
+            order_id: order.id,
+            method: PaymentMethod.COD,
+            status: PaymentStatus.COMPLETED,
+          },
+        ],
+        order: { createdAt: 'DESC' },
+      });
+      if (!candidate) return { result: 'no_cod_payment' as const };
+
+      const payment = await this.lockPayment(manager, candidate.id);
+      if (!payment) return { result: 'no_cod_payment' as const };
+      if (payment.status === PaymentStatus.COMPLETED) {
+        return { result: 'already_settled' as const };
+      }
+
+      const check = this.paymentPolicy.checkCodSettlement(
+        order,
+        payment,
+        line.amount,
+      );
+      if (check !== 'ok') {
+        const type =
+          check === 'not_delivered'
+            ? PaymentIssueType.COD_NOT_DELIVERED
+            : PaymentIssueType.COD_AMOUNT_MISMATCH;
+        const message =
+          check === 'not_delivered'
+            ? `Carrier remitted COD but the order is "${order.status}"`
+            : `Carrier remitted ${line.amount}, payment is ${payment.amount}`;
+        await this.issuesService.raise(
+          {
+            type,
+            paymentId: payment.id,
+            orderId: order.id,
+            method: PaymentMethod.COD,
+            summary: message,
+            details: {
+              reference: dto.reference,
+              carrier: dto.carrier ?? null,
+              remitted: line.amount,
+              expected: Number(payment.amount),
+              orderStatus: order.status,
+            },
+          },
+          manager,
+        );
+        return { result: check, message };
+      }
+
+      payment.status = PaymentStatus.COMPLETED;
+      payment.paidAt = new Date();
+      payment.metadata = {
+        ...(payment.metadata ?? {}),
+        codSettlement: {
+          reference: dto.reference,
+          carrier: dto.carrier ?? null,
+          amount: line.amount,
+          settledBy: actorId,
+          settledAt: new Date().toISOString(),
+        },
+      };
+      await manager.save(Payment, payment);
+      // Earlier statements that didn't add up are settled by this one.
+      await this.issuesService.resolveOpen(
+        payment.id,
+        [
+          PaymentIssueType.COD_AMOUNT_MISMATCH,
+          PaymentIssueType.COD_NOT_DELIVERED,
+        ],
+        `Settled by COD statement ${dto.reference}`,
+        actorId,
+        manager,
+      );
+      return { result: 'settled' as const };
+    });
+  }
+
+  // Full refund of a payment that arrived after its order was cancelled and
+  // the stock was gone. Raised as an issue either way: the customer needs to
+  // hear about it, and a failed refund needs doing by hand.
+  private async refundLatePayment(payment: Payment): Promise<void> {
+    const items = await this.dataSource.manager.find(OrderItem, {
+      where: { order_id: payment.order_id },
+    });
+    const reason =
+      'Payment received after the order was cancelled; items no longer in stock';
+
+    try {
+      const refund = await this.createRefund(payment.id, {
+        items: items.map((i) => ({
+          order_item_id: i.id,
+          quantity: i.quantity,
+        })),
+        reason,
+      });
+      await this.issuesService.raise({
+        type: PaymentIssueType.LATE_PAYMENT_REFUNDED,
+        paymentId: payment.id,
+        orderId: payment.order_id,
+        method: payment.method,
+        summary: `Late payment refunded automatically (${refund.amount}); let the customer know`,
+        details: { refundId: refund.id, amount: refund.amount },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Automatic refund of late payment ${payment.id} failed`,
+        error instanceof Error ? error.stack : error,
+      );
+      await this.issuesService.raise({
+        type: PaymentIssueType.LATE_PAYMENT_REFUND_FAILED,
+        paymentId: payment.id,
+        orderId: payment.order_id,
+        method: payment.method,
+        summary:
+          'Late payment on a cancelled order could not be refunded automatically; refund it by hand',
+        details: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   }
 
   async findRefunds(paymentId: string): Promise<Refund[]> {

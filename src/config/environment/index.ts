@@ -36,6 +36,12 @@ export class EnvironmentVariables {
   @Min(0)
   PENDING_ORDER_TTL_MINUTES: number = 30;
 
+  // Largest order total that may be paid cash on delivery (0 = no limit).
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  COD_MAX_ORDER_TOTAL: number = 0;
+
   // Database
   @IsInt()
   @Min(1)
@@ -124,4 +130,31 @@ export class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   STRIPE_CHECKOUT_CANCEL_URL!: string;
+
+  // VNPAY (optional; the gateway is enabled when TMN code + secret are set)
+  @IsOptional()
+  @IsString()
+  VNPAY_TMN_CODE?: string;
+
+  @IsOptional()
+  @IsString()
+  VNPAY_HASH_SECRET?: string;
+
+  @IsOptional()
+  @IsString()
+  VNPAY_PAYMENT_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  VNPAY_API_URL?: string;
+
+  @ValidateIf((env: EnvironmentVariables) => Boolean(env.VNPAY_TMN_CODE))
+  @IsString()
+  @IsNotEmpty()
+  VNPAY_RETURN_URL?: string;
+
+  @ValidateIf((env: EnvironmentVariables) => Boolean(env.VNPAY_TMN_CODE))
+  @IsString()
+  @IsNotEmpty()
+  VNPAY_RESULT_URL?: string;
 }

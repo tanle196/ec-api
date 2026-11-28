@@ -7,6 +7,7 @@ import { JwtConfig } from './environment/jwt.config';
 import { MailConfig } from './environment/mail.config';
 import { MediaConfig } from './environment/media.config';
 import { StripeConfig } from './environment/stripe.config';
+import { VnpayConfig } from './environment/vnpay.config';
 import { ConfigModules, ConfigModulesType } from './types/ConfigModules';
 import { AppConfig } from './environment/app.config';
 
@@ -48,6 +49,10 @@ export class TypedConfigService {
 
   getStripeConfig(): StripeConfig {
     return this.getModuleConfig<StripeConfig>(ConfigModules.Stripe);
+  }
+
+  getVnpayConfig(): VnpayConfig {
+    return this.getModuleConfig<VnpayConfig>(ConfigModules.Vnpay);
   }
 
   getEnv(): NodeEnv {

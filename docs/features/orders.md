@@ -19,6 +19,7 @@
 - New orders always start in `OrderStatus.PENDING`, with `total = subtotal + shippingFee - discount` (shippingFee from app config).
 - Each order item stores its share of the order money: `discountAmount` (its share of the discount, 0 for lines outside a scoped code), `shippingAmount` (shipping fee split by line total) and `paidAmount = total - discountAmount + shippingAmount`. Shares are rounded so the per-line values sum exactly to `order.discount`, `order.shippingFee` and `order.total`. Editing a pending order's items recomputes them.
 - Cancelling an order (customer or admin) also releases its discount redemptions, giving the code's use back.
+- Cancelling, expiring or editing (items) an order marks its `pending` payments `failed`. A payment captured afterwards is handled by `confirmAfterPayment`: a cancelled order is revived when its stock can be reserved again, otherwise the payment is refunded (see [payments.md](payments.md#late-payments)).
 - Every order creation and status change is recorded in `OrderStatusHistory` for audit purposes.
 - **Editing an order** (`PATCH /orders/me/:id`) is only allowed while `status === PENDING`; otherwise `400 Cannot edit an order with status "<status>"`.
   - Editing items replaces the entire item list: stock for old items is restored first, then stock for new items is decremented (same conditional-update/oversell protection as creation).

@@ -17,14 +17,21 @@ describe('PaymentWebhooksController', () => {
       refundFromGatewayEvent: jest.fn(),
     };
 
+    const vnpayIpnService = {
+      handleIpn: jest.fn().mockResolvedValue({ RspCode: '00', Message: 'ok' }),
+      resolveReturnUrl: jest.fn().mockResolvedValue('https://shop/result'),
+    };
+
     const controller = new PaymentWebhooksController(
       stripeWebhookVerifier as never,
       paymentWebhooksService as never,
       paymentsService as never,
+      vnpayIpnService as never,
     );
 
     return {
       controller,
+      vnpayIpnService,
       stripeWebhookVerifier,
       paymentWebhooksService,
       paymentsService,
@@ -93,6 +100,7 @@ describe('PaymentWebhooksController', () => {
       'pi_1',
       expect.anything(),
       expect.stringContaining('evt_1'),
+      undefined,
     );
     expect(paymentWebhooksService.markProcessed).toHaveBeenCalledWith(
       record,
@@ -197,5 +205,56 @@ describe('PaymentWebhooksController', () => {
       record,
       'payment-1',
     );
+  });
+
+  it('passes the captured Stripe amount on to completion', async () => {
+    const {
+      controller,
+      stripeWebhookVerifier,
+      paymentWebhooksService,
+      paymentsService,
+    } = buildController();
+    stripeWebhookVerifier.verify.mockReturnValue({
+      id: 'evt_9',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          metadata: { payment_id: 'payment-1' },
+          payment_status: 'paid',
+          payment_intent: 'pi_9',
+          amount_total: 150000,
+          currency: 'vnd',
+        },
+      },
+    });
+    paymentWebhooksService.recordEvent.mockResolvedValue({
+      isNew: true,
+      record: { id: 'r' },
+    });
+
+    await controller.handleStripe(fakeRequest() as never);
+
+    expect(paymentsService.completeFromGatewayEvent).toHaveBeenCalledWith(
+      'payment-1',
+      'pi_9',
+      expect.anything(),
+      expect.any(String),
+      150000,
+    );
+  });
+
+  it('delegates VNPay IPN and return URL handling', async () => {
+    const { controller, vnpayIpnService } = buildController();
+    const query = { vnp_TxnRef: 'abc' };
+
+    await expect(controller.vnpayIpn(query)).resolves.toEqual({
+      RspCode: '00',
+      Message: 'ok',
+    });
+    await expect(controller.vnpayReturn(query)).resolves.toEqual({
+      url: 'https://shop/result',
+      statusCode: 302,
+    });
+    expect(vnpayIpnService.handleIpn).toHaveBeenCalledWith(query);
   });
 });

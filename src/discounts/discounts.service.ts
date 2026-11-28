@@ -295,6 +295,33 @@ export class DiscountsService {
     }
   }
 
+  /**
+   * Undoes `releaseForOrder` for an order revived by a late payment. The
+   * use is counted again unconditionally: the customer already paid the
+   * discounted price, so a code that ran out in the meantime is honoured.
+   */
+  async reinstateForOrder(
+    manager: EntityManager,
+    orderId: string,
+  ): Promise<void> {
+    const redemptions = await manager.find(DiscountRedemption, {
+      where: { order_id: orderId, status: DiscountRedemptionStatus.RELEASED },
+    });
+
+    for (const redemption of redemptions) {
+      await manager.update(DiscountRedemption, redemption.id, {
+        status: DiscountRedemptionStatus.ACTIVE,
+        releasedAt: null,
+      });
+      await manager.increment(
+        Discount,
+        { id: redemption.discount_id },
+        'usedCount',
+        1,
+      );
+    }
+  }
+
   // Keeps the ledger in step when a pending order is edited and its
   // discount is re-priced.
   async updateRedemptionAmount(

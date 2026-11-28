@@ -8,6 +8,7 @@ const appConfig = registerAs(ConfigModules.App, () => ({
   // Unpaid online orders are cancelled (and their stock released) after
   // this many minutes. 0 turns expiry off.
   pendingOrderTtlMinutes: Number(process.env.PENDING_ORDER_TTL_MINUTES ?? 30),
+  codMaxOrderTotal: Number(process.env.COD_MAX_ORDER_TOTAL ?? 0),
 }));
 
 export type AppConfig = ConfigType<typeof appConfig>;
