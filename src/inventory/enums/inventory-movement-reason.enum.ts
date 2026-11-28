@@ -9,6 +9,8 @@ export enum InventoryMovementReason {
   ORDER_RELEASE = 'order_release',
   // Order handed to the carrier: leaves the warehouse.
   ORDER_SHIP = 'order_ship',
+  // An undelivered parcel came back to the warehouse.
+  RETURN_RESTOCK = 'return_restock',
   // Goods received on a confirmed stock receipt.
   PURCHASE_IN = 'purchase_in',
   // Manual correction (stocktake, damage, loss...).

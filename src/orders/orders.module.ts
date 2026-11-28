@@ -6,6 +6,7 @@ import { Discount } from '@/discounts/entities/discount.entity';
 import { DiscountsModule } from '@/discounts/discounts.module';
 import { CartsModule } from '@/carts/carts.module';
 import { InventoryModule } from '@/inventory/inventory.module';
+import { OutboxModule } from '@/outbox/outbox.module';
 import { MailModule } from '@/mail/mail.module';
 import { UsersModule } from '@/users/users.module';
 // Only the Payment entity is imported here (not PaymentsModule) — cancel()
@@ -20,6 +21,13 @@ import { OrdersController } from './orders.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 import { OrdersService } from './orders.service';
 import { OrderExpiryScheduler } from './order-expiry.scheduler';
+import { OrderCompletionScheduler } from './order-completion.scheduler';
+import { OrderNotificationsHandler } from './order-notifications.handler';
+import { AdminShipmentsController } from './shipments/admin-shipments.controller';
+import { ShipmentEvent } from './shipments/entities/shipment-event.entity';
+import { Shipment } from './shipments/entities/shipment.entity';
+import { ShipmentPolicy } from './shipments/policies/shipment.policy';
+import { ShipmentsService } from './shipments/shipments.service';
 import { OrderPolicy } from './policies/order.policy';
 
 @Module({
@@ -28,6 +36,8 @@ import { OrderPolicy } from './policies/order.policy';
       Order,
       OrderItem,
       OrderStatusHistory,
+      Shipment,
+      ShipmentEvent,
       Address,
       ProductVariant,
       Discount,
@@ -36,11 +46,24 @@ import { OrderPolicy } from './policies/order.policy';
     DiscountsModule,
     CartsModule,
     InventoryModule,
+    OutboxModule,
     MailModule,
     UsersModule,
   ],
-  controllers: [OrdersController, AdminOrdersController],
-  providers: [OrdersService, OrderPolicy, OrderExpiryScheduler],
-  exports: [OrdersService],
+  controllers: [
+    OrdersController,
+    AdminOrdersController,
+    AdminShipmentsController,
+  ],
+  providers: [
+    OrdersService,
+    OrderPolicy,
+    OrderExpiryScheduler,
+    OrderCompletionScheduler,
+    OrderNotificationsHandler,
+    ShipmentsService,
+    ShipmentPolicy,
+  ],
+  exports: [OrdersService, ShipmentsService],
 })
 export class OrdersModule {}

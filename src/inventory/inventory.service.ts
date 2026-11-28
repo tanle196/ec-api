@@ -192,6 +192,36 @@ export class InventoryService {
   }
 
   /**
+   * Shipped goods came back unsold (returned to sender): they are on hand
+   * and available again. Lines whose variant was deleted are skipped.
+   */
+  async restock(
+    manager: EntityManager,
+    lines: StockLine[],
+    ref: StockRef,
+  ): Promise<void> {
+    const movements: MovementRow[] = [];
+
+    for (const line of this.normalize(lines)) {
+      const variant = await this.lockVariant(manager, line.variantId);
+      if (!variant) continue;
+
+      await manager.update(ProductVariant, variant.id, {
+        stock: variant.stock + line.quantity,
+      });
+      movements.push(
+        this.movement(variant.id, variant.sku, ref, {
+          reason: InventoryMovementReason.RETURN_RESTOCK,
+          onHandDelta: line.quantity,
+          reservedDelta: 0,
+        }),
+      );
+    }
+
+    await this.insertMovements(manager, movements);
+  }
+
+  /**
    * Adds received goods and folds their cost into the variant's weighted
    * average cost: (onHand * avg + qty * cost) / (onHand + qty). With nothing
    * on hand (or no cost yet) the new cost simply becomes the average.

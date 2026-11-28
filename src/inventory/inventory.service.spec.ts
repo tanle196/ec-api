@@ -386,4 +386,30 @@ describe('InventoryService', () => {
       }),
     ]);
   });
+
+  it('restock puts returned goods back on hand and on sale', async () => {
+    const ctx = buildService();
+    ctx.addVariant({ id: 'v-a', sku: 'A', stock: 3, reserved: 1 });
+
+    await ctx.service.restock(
+      ctx.manager as never,
+      [
+        { variantId: 'v-a', quantity: 2 },
+        { variantId: 'gone', quantity: 1 },
+      ],
+      ref,
+    );
+
+    expect(ctx.variants.get('v-a')).toEqual(
+      expect.objectContaining({ stock: 5, reserved: 1 }),
+    );
+    expect(ctx.movements()).toEqual([
+      expect.objectContaining({
+        variant_id: 'v-a',
+        reason: InventoryMovementReason.RETURN_RESTOCK,
+        onHandDelta: 2,
+        reservedDelta: 0,
+      }),
+    ]);
+  });
 });

@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -11,6 +12,7 @@ import {
 import {
   ApiBearerAuth,
   ApiOkResponse,
+  ApiHeader,
   ApiOperation,
   ApiParam,
   ApiResponse,
@@ -21,6 +23,7 @@ import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import type { CurrentUser as ICurrentUser } from '@/common/interfaces/current-user.interface';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CheckoutDto } from './dto/checkout.dto';
+import { parseIdempotencyKey } from './pipes/idempotency-key';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import {
@@ -32,6 +35,13 @@ import { OrdersService } from './orders.service';
 import { mapPaginated } from '@/common/dto/pagination.dto';
 import { OrderMapper } from './mapper/order.mapper';
 
+const IDEMPOTENCY_HEADER = {
+  name: 'Idempotency-Key',
+  required: false,
+  description:
+    'Send the same key when retrying: the order the first attempt placed is returned instead of a new one.',
+};
+
 @ApiTags('orders')
 @Controller('orders')
 @UseGuards(JwtAuthGuard)
@@ -41,25 +51,29 @@ export class OrdersController {
 
   @Post()
   @ApiOperation({ summary: 'Create a new order' })
+  @ApiHeader(IDEMPOTENCY_HEADER)
   @ApiResponse({ status: 201, type: OrderResponseDto })
   create(
     @CurrentUser() user: ICurrentUser,
     @Body() dto: CreateOrderDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<OrderResponseDto> {
     return this.ordersService
-      .create(user.id!, dto)
+      .create(user.id!, dto, parseIdempotencyKey(idempotencyKey))
       .then(OrderMapper.toResponse);
   }
 
   @Post('checkout')
   @ApiOperation({ summary: 'Create an order from my cart, then clear it' })
+  @ApiHeader(IDEMPOTENCY_HEADER)
   @ApiResponse({ status: 201, type: OrderResponseDto })
   checkout(
     @CurrentUser() user: ICurrentUser,
     @Body() dto: CheckoutDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<OrderResponseDto> {
     return this.ordersService
-      .checkout(user.id!, dto)
+      .checkout(user.id!, dto, parseIdempotencyKey(idempotencyKey))
       .then(OrderMapper.toResponse);
   }
 

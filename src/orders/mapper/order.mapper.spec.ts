@@ -51,6 +51,7 @@ describe('OrderMapper', () => {
       id: 'order-1',
       user_id: 'user-1',
       address_id: 'addr-1',
+      shippingAddress: null,
       orderNumber: 'ORD-1',
       status: 'pending',
       subtotal: 200,
@@ -58,6 +59,8 @@ describe('OrderMapper', () => {
       discount: 20,
       total: 190,
       notes: null,
+      deliveredAt: null,
+      completedAt: null,
       items: [
         {
           id: 'oi-1',

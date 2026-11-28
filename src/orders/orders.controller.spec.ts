@@ -68,10 +68,12 @@ describe('Order controllers', () => {
         controller.checkout(user, { address_id: 'a' }),
       ).resolves.toEqual({ order: 'checkout' });
 
-      expect(service.create).toHaveBeenCalledWith('user-1', dto);
-      expect(service.checkout).toHaveBeenCalledWith('user-1', {
-        address_id: 'a',
-      });
+      expect(service.create).toHaveBeenCalledWith('user-1', dto, undefined);
+      expect(service.checkout).toHaveBeenCalledWith(
+        'user-1',
+        { address_id: 'a' },
+        undefined,
+      );
     });
 
     it('findMine lists only the current user orders (non-admin)', async () => {
@@ -110,7 +112,15 @@ describe('Order controllers', () => {
   });
 
   describe('AdminOrdersController', () => {
-    const controller = new AdminOrdersController(service as never);
+    const shipmentsService = {
+      handOver: jest.fn().mockResolvedValue({}),
+      findActiveForOrder: jest.fn().mockResolvedValue({ id: 'ship-1' }),
+      recordEvent: jest.fn().mockResolvedValue({}),
+    };
+    const controller = new AdminOrdersController(
+      service as never,
+      shipmentsService as never,
+    );
 
     it('is protected by JwtAuthGuard and PermissionsGuard', () => {
       expect(
@@ -150,7 +160,7 @@ describe('Order controllers', () => {
     });
 
     it('updateStatus records the admin as the actor', async () => {
-      const dto = { status: OrderStatus.SHIPPED };
+      const dto = { status: OrderStatus.CONFIRMED };
 
       await expect(
         controller.updateStatus({ id: 'admin-1' } as never, 'o', dto),
@@ -160,6 +170,46 @@ describe('Order controllers', () => {
         actorType: OrderStatusChangeActor.ADMIN,
         actorId: 'admin-1',
       });
+    });
+
+    it('turns "shipped" into a manual hand-over to the carrier', async () => {
+      await controller.updateStatus({ id: 'admin-1' } as never, 'o', {
+        status: OrderStatus.SHIPPED,
+        note: 'shop delivers',
+      });
+
+      expect(shipmentsService.handOver).toHaveBeenCalledWith(
+        'o',
+        { carrier: 'manual', note: 'shop delivers' },
+        { source: 'admin', actorId: 'admin-1' },
+      );
+      expect(service.updateStatus).not.toHaveBeenCalledWith(
+        'o',
+        expect.objectContaining({ status: OrderStatus.SHIPPED }),
+        expect.anything(),
+      );
+    });
+
+    it('turns "delivered" into a delivery event on the active shipment', async () => {
+      await controller.updateStatus({ id: 'admin-1' } as never, 'o', {
+        status: OrderStatus.DELIVERED,
+      });
+
+      expect(shipmentsService.recordEvent).toHaveBeenCalledWith(
+        'ship-1',
+        { status: 'delivered', description: undefined },
+        { source: 'admin', actorId: 'admin-1' },
+      );
+    });
+
+    it('refuses "delivered" when nothing is on its way', async () => {
+      shipmentsService.findActiveForOrder.mockResolvedValueOnce(null);
+
+      await expect(
+        controller.updateStatus({ id: 'admin-1' } as never, 'o', {
+          status: OrderStatus.DELIVERED,
+        }),
+      ).rejects.toThrow('Order has no shipment on its way');
     });
   });
 });

@@ -161,7 +161,10 @@ export class ReviewsService {
       .innerJoin('o.items', 'i')
       .innerJoin('i.variant', 'v')
       .where('o.user_id = :userId', { userId })
-      .andWhere('o.status = :status', { status: OrderStatus.DELIVERED })
+      // Completed orders are delivered orders past their return window.
+      .andWhere('o.status IN (:...statuses)', {
+        statuses: [OrderStatus.DELIVERED, OrderStatus.COMPLETED],
+      })
       .andWhere('v.product_id = :productId', { productId })
       .getCount();
 

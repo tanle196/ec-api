@@ -57,25 +57,50 @@ export class OrderPolicy {
     OrderStatus.CONFIRMED,
   ];
 
-  // Valid forward-moving transitions for admin status updates; anything not
-  // listed here (e.g. moving backwards, or out of a terminal status) is
-  // rejected. REFUNDED / PARTIALLY_REFUNDED are deliberately absent: they're
-  // derived from real Refund records and only set by the payment refund flow
-  // (via applyStatusChange). Letting an admin set them here would mark an
-  // order refunded without any money actually being returned.
+  // Transitions staff can make by hand (updateStatus). Anything not
+  // listed (moving backwards, out of a terminal status) is rejected.
+  // - Shipping statuses (shipped, delivered, delivery_failed,
+  //   returned_to_sender) are driven by the order's shipment; see
+  //   SHIPMENT_TRANSITIONS.
+  // - refunded / partially_refunded come only from the refund flow, backed
+  //   by real Refund records.
+  // - completed is set by the return-window job.
   private static readonly ALLOWED_TRANSITIONS: Record<
     OrderStatus,
     OrderStatus[]
   > = {
     [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
     [OrderStatus.CONFIRMED]: [OrderStatus.PROCESSING, OrderStatus.CANCELLED],
-    [OrderStatus.PROCESSING]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
-    [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED],
+    [OrderStatus.PROCESSING]: [OrderStatus.CANCELLED],
+    [OrderStatus.SHIPPED]: [],
     [OrderStatus.DELIVERED]: [],
+    [OrderStatus.DELIVERY_FAILED]: [],
+    [OrderStatus.RETURNED_TO_SENDER]: [],
+    [OrderStatus.COMPLETED]: [],
     [OrderStatus.CANCELLED]: [],
     [OrderStatus.PARTIALLY_REFUNDED]: [],
     [OrderStatus.REFUNDED]: [],
   };
+
+  // Order transitions a shipment status change may cause.
+  private static readonly SHIPMENT_TRANSITIONS: Partial<
+    Record<OrderStatus, OrderStatus[]>
+  > = {
+    [OrderStatus.PROCESSING]: [OrderStatus.SHIPPED],
+    [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED, OrderStatus.DELIVERY_FAILED],
+    [OrderStatus.DELIVERY_FAILED]: [
+      OrderStatus.SHIPPED,
+      OrderStatus.DELIVERED,
+      OrderStatus.RETURNED_TO_SENDER,
+    ],
+  };
+
+  // Shipping statuses staff still pick from the order status dropdown; the
+  // admin API turns them into shipment actions.
+  static readonly SHIPMENT_DRIVEN_STATUSES: OrderStatus[] = [
+    OrderStatus.SHIPPED,
+    OrderStatus.DELIVERED,
+  ];
 
   // ── Ownership ─────────────────────────────────────────────
 
@@ -135,6 +160,25 @@ export class OrderPolicy {
     if (!OrderPolicy.ALLOWED_TRANSITIONS[from].includes(to))
       throw new BadRequestException(
         `Cannot transition order from "${from}" to "${to}"`,
+      );
+  }
+
+  // Delivered, and the return window (ending at `cutoff`) is over.
+  isCompletable(
+    order: Pick<Order, 'status' | 'deliveredAt'>,
+    cutoff: Date,
+  ): boolean {
+    return (
+      order.status === OrderStatus.DELIVERED &&
+      order.deliveredAt !== null &&
+      order.deliveredAt < cutoff
+    );
+  }
+
+  assertShipmentTransition(from: OrderStatus, to: OrderStatus): void {
+    if (!(OrderPolicy.SHIPMENT_TRANSITIONS[from] ?? []).includes(to))
+      throw new BadRequestException(
+        `Cannot move order from "${from}" to "${to}" by shipment`,
       );
   }
 

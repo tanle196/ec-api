@@ -1,8 +1,10 @@
 import { Address } from '@/addresses/entities/address.entity';
+import type { ShippingAddressSnapshot } from '../types/shipping-address-snapshot';
 import { Discount } from '@/discounts/entities/discount.entity';
 import { User } from '@/users/entities/user.entity';
 import {
   Column,
+  Index,
   Entity,
   JoinColumn,
   JoinTable,
@@ -16,6 +18,12 @@ import { OrderItem } from './order-item.entity';
 import { moneyTransformer } from '@/common/utils/money.util';
 
 @Entity('orders')
+// The same Idempotency-Key from the same customer always means the same
+// order, so a retried "place order" can't create a second one.
+@Index('UQ_orders_user_idempotency_key', ['user_id', 'idempotencyKey'], {
+  unique: true,
+  where: '"idempotencyKey" IS NOT NULL',
+})
 export class Order extends AbstractBaseEntity {
   @Column({ type: 'uuid' })
   user_id!: string;
@@ -30,6 +38,15 @@ export class Order extends AbstractBaseEntity {
   @ManyToOne(() => Address, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'address_id' })
   address!: Address | null;
+
+  // The delivery address as it was when the order was placed (or last
+  // edited). The address book entry can change or be deleted afterwards;
+  // this can't.
+  @Column({ type: 'jsonb', nullable: true })
+  shippingAddress!: ShippingAddressSnapshot | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  idempotencyKey!: string | null;
 
   @Column({ unique: true })
   orderNumber!: string;
@@ -77,6 +94,13 @@ export class Order extends AbstractBaseEntity {
 
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
+
+  // Starts the return window; set when the order reaches DELIVERED.
+  @Column({ type: 'timestamptz', nullable: true })
+  deliveredAt!: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  completedAt!: Date | null;
 
   @OneToMany(() => OrderItem, (item) => item.order, {
     cascade: true,

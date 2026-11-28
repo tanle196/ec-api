@@ -62,6 +62,7 @@ export class PaymentPolicy {
   // carrier's COD remittance for it makes sense.
   private static readonly COD_SETTLEABLE_ORDER_STATUSES: OrderStatus[] = [
     OrderStatus.DELIVERED,
+    OrderStatus.COMPLETED,
   ];
 
   // ── Ownership ─────────────────────────────────────────────

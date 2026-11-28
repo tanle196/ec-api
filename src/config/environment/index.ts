@@ -42,6 +42,11 @@ export class EnvironmentVariables {
   @Min(0)
   COD_MAX_ORDER_TOTAL: number = 0;
 
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  RETURN_WINDOW_DAYS: number = 7;
+
   // Database
   @IsInt()
   @Min(1)

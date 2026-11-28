@@ -73,7 +73,6 @@ describe('PaymentsService', () => {
         order: { id: 'order-1', status: OrderStatus.CONFIRMED, total: 100000 },
         fromStatus: OrderStatus.PENDING,
       }),
-      notifyOrderStatusChanged: jest.fn(),
     };
     const issuesService = {
       raise: jest.fn().mockResolvedValue(undefined),
@@ -268,7 +267,7 @@ describe('PaymentsService', () => {
       expect(ordersService.applyStatusChange).not.toHaveBeenCalled();
     });
 
-    it('completes the payment, confirms the order via SYSTEM actor, and notifies once the transaction has committed', async () => {
+    it('completes the payment and confirms the order via SYSTEM actor in the same transaction', async () => {
       const { service, manager, ordersService, issuesService } = buildService();
       const updatedOrder = {
         id: 'order-1',
@@ -315,20 +314,11 @@ describe('PaymentsService', () => {
         manager,
       );
       expect(issuesService.raise).not.toHaveBeenCalled();
-      // Fired via the dedicated post-commit hook, not from inside the
-      // transaction callback — see notifyOrderStatusChanged's doc comment.
-      expect(ordersService.notifyOrderStatusChanged).toHaveBeenCalledWith(
-        updatedOrder,
-        OrderStatus.PENDING,
-      );
     });
 
-    it('never notifies the order status change if the transaction rolls back after applyStatusChange ran', async () => {
-      // Regression test for a bug where the order-status-change email fired
-      // from inside the transaction callback, before a later statement in
-      // that same transaction (here, the final payment save) could still
-      // fail and roll everything back — emailing a change that never
-      // actually persisted.
+    it('propagates a failure to persist the payment', async () => {
+      // The order sync runs in the same transaction, and its email goes
+      // through the outbox in it too, so a failed save rolls all of it back.
       const { service, manager, ordersService } = buildService();
       manager.findOne.mockResolvedValueOnce({
         id: 'payment-1',
@@ -340,8 +330,7 @@ describe('PaymentsService', () => {
       await expect(
         service.completeFromGatewayEvent('payment-1', 'pi_123', {}, 'note'),
       ).rejects.toThrow('db exploded');
-
-      expect(ordersService.notifyOrderStatusChanged).not.toHaveBeenCalled();
+      expect(ordersService.confirmAfterPayment).not.toHaveBeenCalled();
     });
 
     it('completes a payment we had voided (late payment) instead of ignoring it', async () => {
@@ -450,6 +439,64 @@ describe('PaymentsService', () => {
           }),
         );
       });
+    });
+  });
+
+  describe('refundRemaining', () => {
+    it('refunds only the units not refunded yet', async () => {
+      const { service, paymentRepo, manager } = buildService();
+      paymentRepo.findOne.mockResolvedValue({
+        id: 'payment-1',
+        status: PaymentStatus.PARTIALLY_REFUNDED,
+        order: {
+          items: [
+            { id: 'item-1', quantity: 2 },
+            { id: 'item-2', quantity: 1 },
+          ],
+        },
+      });
+      // item-2 already fully refunded, item-1 half.
+      manager.find.mockResolvedValueOnce([
+        {
+          items: [
+            { order_item_id: 'item-1', quantity: 1 },
+            { order_item_id: 'item-2', quantity: 1 },
+          ],
+        },
+      ]);
+      const createRefund = jest
+        .spyOn(service, 'createRefund')
+        .mockResolvedValue({ id: 'r' } as never);
+
+      await service.refundRemaining('payment-1', 'returned');
+
+      expect(createRefund).toHaveBeenCalledWith('payment-1', {
+        items: [{ order_item_id: 'item-1', quantity: 1 }],
+        reason: 'returned',
+      });
+    });
+
+    it('does nothing when everything is refunded or the payment is not paid', async () => {
+      const { service, paymentRepo, manager } = buildService();
+      const createRefund = jest.spyOn(service, 'createRefund');
+
+      paymentRepo.findOne.mockResolvedValueOnce({
+        id: 'p',
+        status: PaymentStatus.COMPLETED,
+        order: { items: [{ id: 'item-1', quantity: 1 }] },
+      });
+      manager.find.mockResolvedValueOnce([
+        { items: [{ order_item_id: 'item-1', quantity: 1 }] },
+      ]);
+      await expect(service.refundRemaining('p', 'x')).resolves.toBeNull();
+
+      paymentRepo.findOne.mockResolvedValueOnce({
+        id: 'p',
+        status: PaymentStatus.PENDING,
+      });
+      await expect(service.refundRemaining('p', 'x')).resolves.toBeNull();
+
+      expect(createRefund).not.toHaveBeenCalled();
     });
   });
 
@@ -614,7 +661,7 @@ describe('PaymentsService', () => {
       ).rejects.toThrow('Cannot update a payment with status "completed"');
     });
 
-    it('completes the payment, confirms the order, and notifies after commit', async () => {
+    it('completes the payment and confirms the order', async () => {
       const { service, manager, ordersService } = buildService();
       const updatedOrder = { id: 'order-1', status: OrderStatus.CONFIRMED };
       ordersService.confirmAfterPayment.mockResolvedValue({
@@ -644,10 +691,6 @@ describe('PaymentsService', () => {
           note: 'Payment completed',
         },
         manager,
-      );
-      expect(ordersService.notifyOrderStatusChanged).toHaveBeenCalledWith(
-        updatedOrder,
-        OrderStatus.PENDING,
       );
     });
 
@@ -683,7 +726,6 @@ describe('PaymentsService', () => {
 
       expect(payment.status).toBe(PaymentStatus.FAILED);
       expect(ordersService.applyStatusChange).not.toHaveBeenCalled();
-      expect(ordersService.notifyOrderStatusChanged).not.toHaveBeenCalled();
     });
   });
 
@@ -773,10 +815,6 @@ describe('PaymentsService', () => {
         OrderStatus.PARTIALLY_REFUNDED,
         expect.anything(),
         manager,
-      );
-      expect(ordersService.notifyOrderStatusChanged).toHaveBeenCalledWith(
-        updatedOrder,
-        OrderStatus.CONFIRMED,
       );
     });
   });
@@ -964,10 +1002,6 @@ describe('PaymentsService', () => {
         expect.objectContaining({ actorId: 'admin-1' }),
         manager,
       );
-      expect(ordersService.notifyOrderStatusChanged).toHaveBeenCalledWith(
-        updatedOrder,
-        OrderStatus.CONFIRMED,
-      );
     });
 
     it('marks the refund FAILED, skips the payment/order settlement, and rethrows when the gateway call fails', async () => {
@@ -997,7 +1031,6 @@ describe('PaymentsService', () => {
       );
       // ...but the payment/order were never touched or notified.
       expect(ordersService.applyStatusChange).not.toHaveBeenCalled();
-      expect(ordersService.notifyOrderStatusChanged).not.toHaveBeenCalled();
     });
   });
 });

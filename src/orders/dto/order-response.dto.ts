@@ -31,11 +31,30 @@ export class OrderItemResponseDto {
   paidAmount!: number;
 }
 
+export class ShippingAddressDto {
+  @ApiProperty() fullName!: string;
+  @ApiProperty() phone!: string;
+  @ApiProperty() addressLine1!: string;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  addressLine2!: string | null;
+  @ApiProperty() city!: string;
+  @ApiProperty() province!: string;
+  @ApiProperty() country!: string;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  postalCode!: string | null;
+}
+
 export class OrderResponseDto {
   @ApiProperty() id!: string;
   @ApiProperty() user_id!: string;
   @ApiPropertyOptional({ type: String, nullable: true })
   address_id!: string | null;
+  @ApiPropertyOptional({
+    type: ShippingAddressDto,
+    nullable: true,
+    description: 'Delivery address as it was when the order was placed',
+  })
+  shippingAddress!: ShippingAddressDto | null;
   @ApiProperty() orderNumber!: string;
   @ApiProperty({ enum: OrderStatus }) status!: OrderStatus;
   @ApiProperty() subtotal!: number;
@@ -44,6 +63,10 @@ export class OrderResponseDto {
   @ApiProperty() total!: number;
   @ApiPropertyOptional({ type: String, nullable: true })
   notes!: string | null;
+  @ApiPropertyOptional({ type: Date, nullable: true })
+  deliveredAt!: Date | null;
+  @ApiPropertyOptional({ type: Date, nullable: true })
+  completedAt!: Date | null;
   @ApiProperty({ type: [OrderItemResponseDto] }) items!: OrderItemResponseDto[];
   @ApiProperty({ type: [AppliedDiscountDto] }) discounts!: AppliedDiscountDto[];
   @ApiProperty() createdAt!: Date;

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -27,7 +28,11 @@ import {
 } from './dto/admin-order-response.dto';
 import { OrderStatusHistoryResponseDto } from './dto/order-status-history-response.dto';
 import { OrderStatusChangeActor } from './enums/order-status-change-actor.enum';
+import { OrderStatus } from './enums/order-status.enum';
 import { OrdersService } from './orders.service';
+import { ShipmentEventSource } from './shipments/enums/shipment-event-source.enum';
+import { ShipmentStatus } from './shipments/enums/shipment-status.enum';
+import { ShipmentsService } from './shipments/shipments.service';
 import { mapPaginated } from '@/common/dto/pagination.dto';
 import { OrderMapper } from './mapper/order.mapper';
 
@@ -36,7 +41,10 @@ import { OrderMapper } from './mapper/order.mapper';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @ApiBearerAuth('access-token')
 export class AdminOrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly shipmentsService: ShipmentsService,
+  ) {}
 
   @Get()
   @Permissions('order.read')
@@ -64,11 +72,36 @@ export class AdminOrdersController {
   @ApiOperation({ summary: 'Admin: update order status' })
   @ApiParam({ name: 'id', example: 'uuid-v4' })
   @ApiOkResponse({ type: AdminOrderResponseDto })
-  updateStatus(
+  async updateStatus(
     @CurrentUser() user: ICurrentUser,
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
   ): Promise<AdminOrderResponseDto> {
+    // "Shipped" and "delivered" picked from the status dropdown are
+    // shipment steps; anything more detailed (carrier, tracking, failed
+    // attempts, returns) goes through the shipments endpoints.
+    const actor = { source: ShipmentEventSource.ADMIN, actorId: user.id };
+    if (dto.status === OrderStatus.SHIPPED) {
+      await this.shipmentsService.handOver(
+        id,
+        { carrier: 'manual', note: dto.note },
+        actor,
+      );
+      return this.ordersService.findOne(id).then(OrderMapper.toResponse);
+    }
+    if (dto.status === OrderStatus.DELIVERED) {
+      const shipment = await this.shipmentsService.findActiveForOrder(id);
+      if (!shipment) {
+        throw new BadRequestException('Order has no shipment on its way');
+      }
+      await this.shipmentsService.recordEvent(
+        shipment.id,
+        { status: ShipmentStatus.DELIVERED, description: dto.note },
+        actor,
+      );
+      return this.ordersService.findOne(id).then(OrderMapper.toResponse);
+    }
+
     return this.ordersService
       .updateStatus(id, dto, {
         actorType: OrderStatusChangeActor.ADMIN,

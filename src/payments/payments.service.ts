@@ -55,15 +55,6 @@ export interface CodSettlementSummary {
   }[];
 }
 
-// Captured from applyStatusChange(..., manager) so the resulting
-// status-change email can be sent after our own transaction has committed,
-// instead of from inside applyStatusChange where it'd risk firing for a
-// change that later rolls back — see applyStatusChange's doc comment.
-type OrderStatusNotify = {
-  order: Order;
-  fromStatus: OrderStatus | null;
-} | null;
-
 // Refunds that are either already confirmed by the gateway (SUCCEEDED) or
 // still awaiting confirmation (PENDING) are both treated as "committed"
 // against the payment's balance/item quantities — a PENDING refund is
@@ -247,7 +238,7 @@ export class PaymentsService {
     // failFromGatewayEvent) touching the same payment, and folds the order
     // status sync into the same transaction so the two writes commit or
     // roll back together.
-    return this.commitAndNotify<Payment>(async (manager) => {
+    return this.dataSource.transaction(async (manager) => {
       const payment = await this.lockPayment(manager, id);
       if (!payment) throw new NotFoundException('Payment not found');
 
@@ -262,27 +253,23 @@ export class PaymentsService {
         payment.metadata = dto.metadata;
       }
 
-      let orderNotify: OrderStatusNotify = null;
-
       if (dto.status === PaymentStatus.COMPLETED) {
         payment.paidAt = new Date();
-        const { outcome, order, fromStatus } =
-          await this.ordersService.confirmAfterPayment(
-            payment.order_id,
-            {
-              actorType: OrderStatusChangeActor.ADMIN,
-              actorId,
-              note: 'Payment completed',
-            },
-            manager,
-          );
+        const { outcome } = await this.ordersService.confirmAfterPayment(
+          payment.order_id,
+          {
+            actorType: OrderStatusChangeActor.ADMIN,
+            actorId,
+            note: 'Payment completed',
+          },
+          manager,
+        );
         // A person marking it paid can refund it themselves; don't record
         // money against an order we can no longer fulfil.
         this.paymentPolicy.assertOrderFulfillable(outcome);
-        orderNotify = { order, fromStatus };
       }
 
-      return { result: await manager.save(Payment, payment), orderNotify };
+      return manager.save(Payment, payment);
     });
   }
 
@@ -308,7 +295,7 @@ export class PaymentsService {
     // with another one on the same payment and both would read the same
     // pre-update status. Folding the order sync into the same transaction
     // also keeps payment and order status from diverging.
-    const { outcome, followUp } = await this.commitAndNotify<{
+    const { outcome, followUp } = await this.dataSource.transaction<{
       outcome: GatewayEventOutcome;
       followUp: {
         payment: Payment;
@@ -317,17 +304,9 @@ export class PaymentsService {
       } | null;
     }>(async (manager) => {
       const payment = await this.lockPayment(manager, paymentId);
-      if (!payment) {
-        return {
-          result: { outcome: 'not_found', followUp: null },
-          orderNotify: null,
-        };
-      }
+      if (!payment) return { outcome: 'not_found', followUp: null };
       if (this.paymentPolicy.isTerminal(payment.status)) {
-        return {
-          result: { outcome: 'already_terminal', followUp: null },
-          orderNotify: null,
-        };
+        return { outcome: 'already_terminal', followUp: null };
       }
 
       // Merged, not replaced: gateways keep data here that later calls
@@ -345,17 +324,11 @@ export class PaymentsService {
       );
 
       return {
-        result: {
-          outcome: 'processed',
-          followUp: {
-            payment,
-            orderTotal: Number(confirmed.order.total),
-            needsRefund: confirmed.outcome === 'not_revivable',
-          },
-        },
-        orderNotify: {
-          order: confirmed.order,
-          fromStatus: confirmed.fromStatus,
+        outcome: 'processed',
+        followUp: {
+          payment,
+          orderTotal: Number(confirmed.order.total),
+          needsRefund: confirmed.outcome === 'not_revivable',
         },
       };
     });
@@ -387,7 +360,7 @@ export class PaymentsService {
     // See completeFromGatewayEvent — same locked read-check-write to stay
     // safe against redelivered/racing webhook events on the same payment.
     // No order sync happens here, so this doesn't go through
-    // commitAndNotify — there's nothing to notify after commit.
+    // dataSource.transaction directly — there's no order sync here.
     return this.dataSource.transaction(async (manager) => {
       const payment = await this.lockPayment(manager, paymentId);
       if (!payment) return 'not_found';
@@ -417,10 +390,10 @@ export class PaymentsService {
     // Locked read-check-write, same reasoning as completeFromGatewayEvent —
     // also guards against racing/overlapping with createRefund on the same
     // payment (both ultimately write payment.status and a Refund row).
-    return this.commitAndNotify<GatewayEventOutcome>(async (manager) => {
+    return this.dataSource.transaction<GatewayEventOutcome>(async (manager) => {
       const payment = await this.lockPayment(manager, paymentId);
       if (!payment) {
-        return { result: 'not_found', orderNotify: null };
+        return 'not_found';
       }
       // Unlike the sibling gateway-event handlers, this one deliberately
       // doesn't block on the full terminal-status set — COMPLETED
@@ -431,7 +404,7 @@ export class PaymentsService {
       // otherwise let this handler mark a never-paid payment REFUNDED
       // directly, with paidAt never set and no completed charge behind it.
       if (!this.paymentPolicy.isRefundable(payment.status)) {
-        return { result: 'already_terminal', orderNotify: null };
+        return 'already_terminal';
       }
 
       const latestRefundId = this.extractLatestRefundId(charge);
@@ -440,7 +413,7 @@ export class PaymentsService {
           where: { transactionId: latestRefundId },
         });
         if (alreadyRecorded) {
-          return { result: 'already_terminal', orderNotify: null };
+          return 'already_terminal';
         }
       }
 
@@ -470,7 +443,7 @@ export class PaymentsService {
         new Big(amountRefundedTotal).minus(alreadyRefunded),
       );
       if (newAmount <= 0) {
-        return { result: 'already_terminal', orderNotify: null };
+        return 'already_terminal';
       }
 
       await manager.save(
@@ -492,7 +465,7 @@ export class PaymentsService {
           : PaymentStatus.PARTIALLY_REFUNDED;
       await manager.save(Payment, payment);
 
-      const orderNotify = await this.ordersService.applyStatusChange(
+      await this.ordersService.applyStatusChange(
         payment.order_id,
         payment.status === PaymentStatus.REFUNDED
           ? OrderStatus.REFUNDED
@@ -501,7 +474,7 @@ export class PaymentsService {
         manager,
       );
 
-      return { result: 'processed', orderNotify };
+      return 'processed';
     });
   }
 
@@ -672,10 +645,10 @@ export class PaymentsService {
     // the payment status write, and the order status sync commit together
     // and stay consistent with other concurrent settlements (webhook
     // events, other refunds) on the same payment.
-    await this.commitAndNotify<undefined>(async (manager) => {
+    await this.dataSource.transaction(async (manager) => {
       await manager.save(Refund, refund);
 
-      if (gatewayError) return { result: undefined, orderNotify: null };
+      if (gatewayError) return;
 
       // Use the freshly locked row as the base for the mutation, not the
       // `payment` object captured back in Phase 1 — that snapshot predates
@@ -694,7 +667,7 @@ export class PaymentsService {
           : PaymentStatus.PARTIALLY_REFUNDED;
       await manager.save(Payment, lockedPayment);
 
-      const orderNotify = await this.ordersService.applyStatusChange(
+      await this.ordersService.applyStatusChange(
         lockedPayment.order_id,
         lockedPayment.status === PaymentStatus.REFUNDED
           ? OrderStatus.REFUNDED
@@ -706,8 +679,6 @@ export class PaymentsService {
         },
         manager,
       );
-
-      return { result: undefined, orderNotify };
     });
 
     if (gatewayError) throw gatewayError;
@@ -886,6 +857,39 @@ export class PaymentsService {
     }
   }
 
+  /**
+   * Refunds whatever of a paid payment hasn't been refunded yet (every
+   * unit not already in a pending or succeeded refund). Returns null when
+   * nothing is left, so calling it again after it succeeded is a no-op.
+   */
+  async refundRemaining(
+    paymentId: string,
+    reason: string,
+  ): Promise<Refund | null> {
+    const payment = await this.paymentRepo.findOne({
+      where: { id: paymentId },
+      relations: ['order', 'order.items'],
+    });
+    if (!payment || !this.paymentPolicy.isRefundable(payment.status)) {
+      return null;
+    }
+
+    const committed = await this.getRefundQuantitiesByItem(
+      this.dataSource.manager,
+      paymentId,
+      COMMITTED_REFUND_STATUSES,
+    );
+    const items = payment.order.items
+      .map((item) => ({
+        order_item_id: item.id,
+        quantity: item.quantity - (committed.get(item.id) ?? 0),
+      }))
+      .filter((item) => item.quantity > 0);
+    if (items.length === 0) return null;
+
+    return this.createRefund(paymentId, { items, reason });
+  }
+
   async findRefunds(paymentId: string): Promise<Refund[]> {
     return this.refundRepo.find({
       where: { payment_id: paymentId },
@@ -907,30 +911,6 @@ export class PaymentsService {
       where: { id: paymentId },
       lock: { mode: 'pessimistic_write' },
     });
-  }
-
-  // Runs `work` inside a transaction, then — only once that transaction has
-  // actually committed — fires the order-status-change notification it
-  // captured via ordersService.applyStatusChange(..., manager), if any.
-  // Centralizes the "commit first, notify after" pattern every method here
-  // that folds an order status sync into its own payment transaction must
-  // follow; see applyStatusChange's doc comment for why notifying can't
-  // happen inline from inside `work`.
-  private async commitAndNotify<T>(
-    work: (
-      manager: EntityManager,
-    ) => Promise<{ result: T; orderNotify: OrderStatusNotify }>,
-  ): Promise<T> {
-    const { result, orderNotify } = await this.dataSource.transaction(work);
-
-    if (orderNotify) {
-      this.ordersService.notifyOrderStatusChanged(
-        orderNotify.order,
-        orderNotify.fromStatus,
-      );
-    }
-
-    return result;
   }
 
   private async getRefundQuantitiesByItem(

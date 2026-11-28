@@ -3,6 +3,11 @@ import { InventoryMovement } from '@/inventory/entities/inventory-movement.entit
 import { InventoryMovementReason } from '@/inventory/enums/inventory-movement-reason.enum';
 import { allocateProportionally } from '@/common/utils/allocation.util';
 import { allocateOrderLines } from '@/orders/pricing/order-pricing';
+import { Shipment } from '@/orders/shipments/entities/shipment.entity';
+import { ShipmentEvent } from '@/orders/shipments/entities/shipment-event.entity';
+import { ShipmentEventSource } from '@/orders/shipments/enums/shipment-event-source.enum';
+import { ShipmentStatus } from '@/orders/shipments/enums/shipment-status.enum';
+import { snapshotAddress } from '@/orders/types/shipping-address-snapshot';
 import { Address } from '@/addresses/entities/address.entity';
 import { ProductVariant } from '@/products/entities/product-variant.entity';
 import { User } from '@/users/entities/user.entity';
@@ -110,6 +115,8 @@ export async function seedOrders(dataSource: DataSource): Promise<void> {
   const orderRepo = dataSource.getRepository(Order);
   const itemRepo = dataSource.getRepository(OrderItem);
   const movementRepo = dataSource.getRepository(InventoryMovement);
+  const shipmentRepo = dataSource.getRepository(Shipment);
+  const shipmentEventRepo = dataSource.getRepository(ShipmentEvent);
 
   for (const data of ORDERS) {
     const user = await userRepo.findOne({ where: { email: data.userEmail } });
@@ -173,6 +180,7 @@ export async function seedOrders(dataSource: DataSource): Promise<void> {
     const order = orderRepo.create({
       user_id: user.id,
       address_id: address.id,
+      shippingAddress: snapshotAddress(address),
       orderNumber: generateOrderNumber(daysAgo),
       status: data.status,
       subtotal,
@@ -180,6 +188,7 @@ export async function seedOrders(dataSource: DataSource): Promise<void> {
       discount,
       total,
       notes: data.notes ?? null,
+      deliveredAt: data.status === OrderStatus.DELIVERED ? createdAt : null,
       createdAt,
       updatedAt: createdAt,
     });
@@ -197,6 +206,36 @@ export async function seedOrders(dataSource: DataSource): Promise<void> {
         itemRepo.create({ ...item, ...lines[i], order_id: savedOrder.id }),
       ),
     );
+
+    // Shipped and delivered orders have the shipment that got them there.
+    if (
+      data.status === OrderStatus.SHIPPED ||
+      data.status === OrderStatus.DELIVERED
+    ) {
+      const status =
+        data.status === OrderStatus.SHIPPED
+          ? ShipmentStatus.IN_TRANSIT
+          : ShipmentStatus.DELIVERED;
+      const shipment = await shipmentRepo.save(
+        shipmentRepo.create({
+          order_id: savedOrder.id,
+          status,
+          carrier: 'GHN',
+          trackingNumber: `GHN${savedOrder.orderNumber.slice(-6)}`,
+          shippedAt: createdAt,
+          deliveredAt: status === ShipmentStatus.DELIVERED ? createdAt : null,
+        }),
+      );
+      await shipmentEventRepo.save(
+        shipmentEventRepo.create({
+          shipment_id: shipment.id,
+          status,
+          description: 'Seeded',
+          occurredAt: createdAt,
+          source: ShipmentEventSource.SYSTEM,
+        }),
+      );
+    }
 
     // Unshipped orders hold their stock, as they would if placed for real.
     if (RESERVING_STATUSES.includes(data.status)) {

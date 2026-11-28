@@ -26,15 +26,28 @@
   - If the order has applied discounts, the new subtotal is re-validated against each discount's `minOrderValue`; if it no longer qualifies, `400 Order no longer meets the minimum value for discount code "<code>"`.
   - Address can be changed only to another address owned by the same user (`404` otherwise).
 - **Cancellation** (`PATCH /orders/me/:id/cancel`) is only allowed when status is `PENDING` or `CONFIRMED`; otherwise `400 Cannot cancel order with status "<status>"`. Cancelling releases the order's reserved stock for all items.
-- **Admin status transitions** (`PATCH /admin/orders/:id/status`) follow a strict forward-only state machine (`ALLOWED_TRANSITIONS`); any transition not explicitly listed is rejected with `400 Cannot transition order from "<from>" to "<to>"`:
+- **Admin status transitions** (`PATCH /admin/orders/:id/status`) follow a forward-only table; anything else is rejected with `400 Cannot transition order from "<from>" to "<to>"`:
   - `pending` → `confirmed`, `cancelled`
   - `confirmed` → `processing`, `cancelled`
-  - `processing` → `shipped`, `cancelled`
-  - `shipped` → `delivered`
-  - `delivered` → `refunded`
-  - `partially_refunded` → `refunded`
-  - `cancelled`, `refunded` are terminal (no further transitions)
-  - Transitioning to `cancelled` releases reserved stock; transitioning to `shipped` consumes it.
+  - `processing` → `cancelled`
+  - Picking `shipped` hands the order to carrier `manual` (a shipment is created); picking `delivered` records delivery on the active shipment (`400 Order has no shipment on its way` if none). Everything else about shipping goes through the shipment endpoints below.
+  - `cancelled`, `refunded`, `returned_to_sender`, `completed` are terminal for staff; `refunded` / `partially_refunded` come only from the refund flow.
+- **Shipments** (`POST /admin/orders/:orderId/shipments`, `GET /admin/orders/:orderId/shipments`, `POST /admin/shipments/:id/events`): a shipment's status drives the order:
+
+  | Shipment | → Order | Side effect |
+  |---|---|---|
+  | `in_transit` (hand-over) | `processing` → `shipped` | reservation leaves the warehouse, line `unitCost` snapshotted |
+  | `delivery_failed` | `shipped` → `delivery_failed` | — |
+  | `in_transit` (re-attempt) | `delivery_failed` → `shipped` | attempts + 1; no stock movement |
+  | `delivered` | → `delivered` | `deliveredAt` set (starts the return window) |
+  | `returning` | stays `delivery_failed` | — |
+  | `returned` | → `returned_to_sender` | goods restocked (`return_restock`); outbox `order.returned_to_sender` → payments refunds what was paid / voids uncollected COD |
+
+  At most one shipment per order is on its way (`in_transit`/`delivery_failed`/`returning`); repeating the current status only adds tracking history. Orders already shipped/delivered before shipments existed got a `legacy` shipment.
+- **Completion**: hourly, `delivered` orders whose `deliveredAt` is older than `RETURN_WINDOW_DAYS` (default 7) and with no `pending` refund request become `completed`.
+- **Delivery address snapshot**: `shippingAddress` (jsonb) stores the address as it was when the order was placed or its address last changed; editing or deleting the address book entry doesn't affect it.
+- **Idempotency**: `POST /orders` and `POST /orders/checkout` accept an `Idempotency-Key` header (1–100 printable ASCII). The same key from the same customer returns the order the first request placed — also when two requests race (unique index on `user_id` + key).
+- **Outbox**: every status change (one function, `recordStatusChange`) and order placement writes an `outbox_events` row in the same transaction. A dispatcher (every 3 s, `SKIP LOCKED`, at-least-once, exponential backoff, dead after 10 attempts) runs the handlers: order emails (`order.placed`, `order.status_changed`) and the returned-to-sender refund. Dead events: `GET /admin/outbox?status=dead`, `POST /admin/outbox/:id/retry`.
 - Order status can also change as a side effect of payment events (`OrdersService.applyStatusChange`, used only by the payments module): payment completed → order `confirmed`; payment/refund fully refunded → order `refunded`; item-level partial refund → order `partially_refunded`.
 - Non-admin users can only see/act on their own orders (`ForbiddenException` if `order.user_id !== userId` in `findOne`).
 - **Refund eligibility** (payments module, item-level, tied to orders):

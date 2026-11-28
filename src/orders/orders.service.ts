@@ -24,8 +24,7 @@ import { InventoryService, StockLine } from '@/inventory/inventory.service';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
 import { MONEY_DECIMAL_PLACES, toMoney } from '@/common/utils/money.util';
 import { TypedConfigService } from '@/config/TypedConfigService';
-import { MailService } from '@/mail/mail.service';
-import { UsersService } from '@/users/users.service';
+import { OutboxService } from '@/outbox/outbox.service';
 import { Payment } from '@/payments/entities/payment.entity';
 import { PaymentStatus } from '@/payments/enums/payment-status.enum';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -42,7 +41,9 @@ import { OrderItem } from './entities/order-item.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderStatus } from './enums/order-status.enum';
 import { OrderStatusChangeActor } from './enums/order-status-change-actor.enum';
+import { OrderEvents } from './order-events';
 import { OrderPolicy } from './policies/order.policy';
+import { snapshotAddress } from './types/shipping-address-snapshot';
 import { allocateOrderLines, LineAllocation } from './pricing/order-pricing';
 
 interface ResolvedOrderItem {
@@ -84,13 +85,23 @@ export class OrdersService {
     private readonly discountsService: DiscountsService,
     private readonly configService: TypedConfigService,
     private readonly cartsService: CartsService,
-    private readonly mailService: MailService,
-    private readonly usersService: UsersService,
     private readonly orderPolicy: OrderPolicy,
     private readonly inventoryService: InventoryService,
+    private readonly outboxService: OutboxService,
   ) {}
 
-  async create(userId: string, dto: CreateOrderDto): Promise<Order> {
+  /**
+   * `idempotencyKey` (the Idempotency-Key header) makes a retried request
+   * return the order the first attempt created instead of placing another.
+   */
+  async create(
+    userId: string,
+    dto: CreateOrderDto,
+    idempotencyKey?: string,
+  ): Promise<Order> {
+    const existing = await this.findByIdempotencyKey(userId, idempotencyKey);
+    if (existing) return existing;
+
     // Address is validated first so a bad address_id always fails fast with
     // a consistent error, regardless of DB latency. Kept sequential (rather
     // than Promise.all with resolveOrderItems) so the observable error for a
@@ -115,24 +126,28 @@ export class OrdersService {
       shippingFee,
     );
 
-    const order = await this.dataSource.transaction((manager) =>
+    return this.placeOnce(userId, idempotencyKey, (manager) =>
       this.persistOrder(manager, {
         userId,
-        addressId: dto.address_id,
+        address,
         resolvedItems,
         subtotal,
         shippingFee,
         pricing,
         notes: dto.notes,
+        idempotencyKey,
       }),
     );
-
-    void this.notifyOrderConfirmation(order);
-
-    return order;
   }
 
-  async checkout(userId: string, dto: CheckoutDto): Promise<Order> {
+  async checkout(
+    userId: string,
+    dto: CheckoutDto,
+    idempotencyKey?: string,
+  ): Promise<Order> {
+    const existing = await this.findByIdempotencyKey(userId, idempotencyKey);
+    if (existing) return existing;
+
     // Address is validated before fetching the cart. getCart() creates and
     // persists an empty cart as a side effect when the user has none, so
     // running it concurrently with the address check would leave stray cart
@@ -164,22 +179,53 @@ export class OrdersService {
       shippingFee,
     );
 
-    const order = await this.dataSource.transaction((manager) =>
+    return this.placeOnce(userId, idempotencyKey, (manager) =>
       this.persistOrder(manager, {
         userId,
-        addressId: dto.address_id,
+        address,
         resolvedItems,
         subtotal,
         shippingFee,
         pricing,
         notes: dto.notes,
         cartId: cart.id,
+        idempotencyKey,
       }),
     );
+  }
 
-    void this.notifyOrderConfirmation(order);
+  private async findByIdempotencyKey(
+    userId: string,
+    key: string | undefined,
+  ): Promise<Order | null> {
+    if (!key) return null;
+    const order = await this.orderRepo.findOne({
+      where: { user_id: userId, idempotencyKey: key },
+    });
+    return order
+      ? this.findOrderOrThrow(this.orderRepo.manager, order.id)
+      : null;
+  }
 
-    return order;
+  // Runs the placement; if a concurrent request with the same key won the
+  // race (unique index), returns that request's order instead of failing.
+  private async placeOnce(
+    userId: string,
+    idempotencyKey: string | undefined,
+    place: (manager: EntityManager) => Promise<Order>,
+  ): Promise<Order> {
+    try {
+      return await this.dataSource.transaction(place);
+    } catch (error) {
+      if (idempotencyKey && this.isIdempotencyConflict(error)) {
+        const existing = await this.findByIdempotencyKey(
+          userId,
+          idempotencyKey,
+        );
+        if (existing) return existing;
+      }
+      throw error;
+    }
   }
 
   private async resolveOrderItems(
@@ -315,13 +361,14 @@ export class OrdersService {
     manager: EntityManager,
     params: {
       userId: string;
-      addressId: string;
+      address: Address;
       resolvedItems: ResolvedOrderItem[];
       subtotal: number;
       shippingFee: number;
       pricing: OrderPricing;
       notes?: string;
       cartId?: string;
+      idempotencyKey?: string;
     },
   ): Promise<Order> {
     const { shippingFee, pricing } = params;
@@ -331,7 +378,9 @@ export class OrdersService {
 
     const savedOrder = await this.saveOrderWithUniqueNumber(manager, {
       user_id: params.userId,
-      address_id: params.addressId,
+      address_id: params.address.id,
+      shippingAddress: snapshotAddress(params.address),
+      idempotencyKey: params.idempotencyKey ?? null,
       status: OrderStatus.PENDING,
       subtotal: params.subtotal,
       shippingFee,
@@ -380,6 +429,12 @@ export class OrdersService {
       toStatus: OrderStatus.PENDING,
       actorType: OrderStatusChangeActor.CUSTOMER,
       actorId: params.userId,
+    });
+    await this.outboxService.enqueue(manager, {
+      type: OrderEvents.PLACED,
+      aggregateType: 'order',
+      aggregateId: savedOrder.id,
+      payload: { orderId: savedOrder.id },
     });
 
     return this.findOrderOrThrow(manager, savedOrder.id);
@@ -475,12 +530,14 @@ export class OrdersService {
     this.orderPolicy.assertEditable(order);
 
     let addressId = order.address_id;
+    let shippingAddress = order.shippingAddress;
     if (dto.address_id && dto.address_id !== order.address_id) {
       const address = await this.addressRepo.findOne({
         where: { id: dto.address_id, user_id: userId },
       });
       if (!address) throw new NotFoundException('Address not found');
       addressId = dto.address_id;
+      shippingAddress = snapshotAddress(address);
     }
 
     return this.dataSource.transaction(async (manager) => {
@@ -558,6 +615,7 @@ export class OrdersService {
       // A targeted update() sidesteps the cascade entirely.
       await manager.update(Order, order.id, {
         address_id: order.address_id,
+        shippingAddress,
         notes: order.notes,
         subtotal: order.subtotal,
         discount: order.discount,
@@ -579,53 +637,46 @@ export class OrdersService {
     // silently overwrite the other's status change — here that could mean
     // reverting a just-confirmed order back to CANCELLED and incorrectly
     // restoring stock for an order that was actually paid.
-    const { updated, fromStatus } = await this.dataSource.transaction(
-      async (manager) => {
-        const order = await manager.findOne(Order, {
-          where: { id },
-          lock: { mode: 'pessimistic_write' },
-        });
-        if (!order) throw new NotFoundException('Order not found');
-        this.orderPolicy.assertOwnedBy(order, userId);
-        this.orderPolicy.assertCancellable(order);
+    return this.dataSource.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!order) throw new NotFoundException('Order not found');
+      this.orderPolicy.assertOwnedBy(order, userId);
+      this.orderPolicy.assertCancellable(order);
 
-        // The cancellable statuses include CONFIRMED, which is also the status
-        // a completed payment puts the order in — without this check, a
-        // customer could self-cancel (and get stock silently restored for)
-        // an order that was already actually paid, with no refund ever
-        // triggered. The Order row lock taken above already serializes this
-        // against a concurrent webhook still confirming payment — see the
-        // comment at the top of this method.
-        await this.assertNotPaid(manager, id);
+      // The cancellable statuses include CONFIRMED, which is also the status
+      // a completed payment puts the order in — without this check, a
+      // customer could self-cancel (and get stock silently restored for)
+      // an order that was already actually paid, with no refund ever
+      // triggered. The Order row lock taken above already serializes this
+      // against a concurrent webhook still confirming payment — see the
+      // comment at the top of this method.
+      await this.assertNotPaid(manager, id);
 
-        const fromStatus = order.status;
+      const fromStatus = order.status;
 
-        await this.releaseStock(manager, order, {
-          actorId: userId,
-          note: 'Cancelled by customer',
-        });
-        await this.discountsService.releaseForOrder(manager, order.id);
-        await this.voidPendingPayments(manager, order.id, 'order_cancelled');
+      await this.releaseStock(manager, order, {
+        actorId: userId,
+        note: 'Cancelled by customer',
+      });
+      await this.discountsService.releaseForOrder(manager, order.id);
+      await this.voidPendingPayments(manager, order.id, 'order_cancelled');
 
-        order.status = OrderStatus.CANCELLED;
-        await manager.save(Order, order);
+      order.status = OrderStatus.CANCELLED;
+      await manager.save(Order, order);
 
-        await this.recordStatusChange(manager, {
-          orderId: order.id,
-          fromStatus,
-          toStatus: OrderStatus.CANCELLED,
-          actorType: OrderStatusChangeActor.CUSTOMER,
-          actorId: userId,
-        });
+      await this.recordStatusChange(manager, {
+        orderId: order.id,
+        fromStatus,
+        toStatus: OrderStatus.CANCELLED,
+        actorType: OrderStatusChangeActor.CUSTOMER,
+        actorId: userId,
+      });
 
-        const updated = await this.findOrderOrThrow(manager, order.id);
-        return { updated, fromStatus };
-      },
-    );
-
-    void this.notifyOrderStatusUpdate(updated, fromStatus);
-
-    return updated;
+      return this.findOrderOrThrow(manager, order.id);
+    });
   }
 
   /**
@@ -671,12 +722,12 @@ export class OrdersService {
         where: { id: orderId },
         lock: { mode: 'pessimistic_write' },
       });
-      if (!order) return null;
+      if (!order) return false;
 
       const payments = await manager.find(Payment, {
         where: { order_id: orderId },
       });
-      if (!this.orderPolicy.isExpired(order, payments, cutoff)) return null;
+      if (!this.orderPolicy.isExpired(order, payments, cutoff)) return false;
 
       const fromStatus = order.status;
       const note = 'Expired: not paid within the hold window';
@@ -694,15 +745,10 @@ export class OrdersService {
         note,
       });
 
-      return {
-        updated: await this.findOrderOrThrow(manager, order.id),
-        fromStatus,
-      };
+      return true;
     });
 
-    if (!result) return false;
-    void this.notifyOrderStatusUpdate(result.updated, result.fromStatus);
-    return true;
+    return result;
   }
 
   async updateStatus(
@@ -713,55 +759,44 @@ export class OrdersService {
     // See cancel() — same lock-then-validate-then-write pattern, against the
     // same class of race with applyStatusChange/cancel/updateStatus calls
     // landing concurrently on the same order.
-    const { updated, fromStatus } = await this.dataSource.transaction(
-      async (manager) => {
-        const order = await manager.findOne(Order, {
-          where: { id },
-          lock: { mode: 'pessimistic_write' },
-        });
-        if (!order) throw new NotFoundException('Order not found');
+    return this.dataSource.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!order) throw new NotFoundException('Order not found');
 
-        this.orderPolicy.assertCanTransition(order.status, dto.status);
+      this.orderPolicy.assertCanTransition(order.status, dto.status);
 
-        const fromStatus = order.status;
+      const fromStatus = order.status;
 
-        if (dto.status === OrderStatus.CANCELLED) {
-          // Same guard as the customer cancel(): cancelling a paid order
-          // would restore stock while the customer's money is never
-          // returned. Paid orders must go through the refund flow instead.
-          await this.assertNotPaid(manager, order.id);
-          await this.releaseStock(manager, order, {
-            actorId: actor.actorId,
-            note: dto.note ?? 'Cancelled by staff',
-          });
-          await this.discountsService.releaseForOrder(manager, order.id);
-          await this.voidPendingPayments(manager, order.id, 'order_cancelled');
-        }
-
-        if (dto.status === OrderStatus.SHIPPED) {
-          await this.shipStock(manager, order, actor.actorId);
-        }
-
-        order.status = dto.status;
-        await manager.save(Order, order);
-
-        await this.recordStatusChange(manager, {
-          orderId: order.id,
-          fromStatus,
-          toStatus: dto.status,
-          actorType: actor.actorType,
+      if (dto.status === OrderStatus.CANCELLED) {
+        // Same guard as the customer cancel(): cancelling a paid order
+        // would restore stock while the customer's money is never
+        // returned. Paid orders must go through the refund flow instead.
+        await this.assertNotPaid(manager, order.id);
+        await this.releaseStock(manager, order, {
           actorId: actor.actorId,
-          note: dto.note,
+          note: dto.note ?? 'Cancelled by staff',
         });
+        await this.discountsService.releaseForOrder(manager, order.id);
+        await this.voidPendingPayments(manager, order.id, 'order_cancelled');
+      }
 
-        const updated = await this.findOrderOrThrow(manager, order.id);
-        return { updated, fromStatus };
-      },
-    );
+      order.status = dto.status;
+      await manager.save(Order, order);
 
-    void this.notifyOrderStatusUpdate(updated, fromStatus);
+      await this.recordStatusChange(manager, {
+        orderId: order.id,
+        fromStatus,
+        toStatus: dto.status,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        note: dto.note,
+      });
 
-    return updated;
+      return this.findOrderOrThrow(manager, order.id);
+    });
   }
 
   /**
@@ -775,7 +810,6 @@ export class OrdersService {
    *   caller refunds.
    * - anything else -> unchanged ('unchanged').
    *
-   * Callers notify with `notifyOrderStatusChanged` after their commit.
    */
   async confirmAfterPayment(
     orderId: string,
@@ -858,20 +892,9 @@ export class OrdersService {
   // PaymentsService writing a payment row and the resulting order status
   // together) fold this status change into that same transaction instead of
   // opening a second independent one — otherwise the payment write could
-  // commit while this order write fails (or vice versa), leaving payment and
-  // order status inconsistent. When no manager is passed, a fresh
-  // transaction is opened as before.
-  //
-  // Notifying is the caller's responsibility when a manager is passed: this
-  // write is nested inside the caller's own transaction, which may still
-  // roll back (a later statement in that same transaction throwing, or the
-  // final COMMIT itself failing) after this method returns but before the
-  // caller's transaction promise resolves. Firing the status-change email
-  // from inside here would risk notifying about a change that never
-  // actually persisted. Instead, this returns `fromStatus` so the caller
-  // can pass it to `notifyOrderStatusChanged` once ITS OWN transaction has
-  // committed — the same after-commit-only pattern `cancel`/`updateStatus`
-  // already use for their own notifications.
+  // commit while this order write fails (or vice versa). Notifications go
+  // through the outbox in that same transaction, so they only ever go out
+  // for changes that committed.
   async applyStatusChange(
     orderId: string,
     toStatus: OrderStatus,
@@ -919,30 +942,130 @@ export class OrdersService {
       return { order, fromStatus };
     };
 
-    const result = manager
-      ? await run(manager)
-      : await this.dataSource.transaction(run);
-
-    // Only self-notify when we own the transaction (no manager passed) —
-    // by the time we get here it has already committed. See the doc
-    // comment above for the manager-passed case.
-    if (!manager && result.fromStatus !== null) {
-      void this.notifyOrderStatusUpdate(result.order, result.fromStatus);
-    }
-
-    return result;
+    return manager ? run(manager) : this.dataSource.transaction(run);
   }
 
   /**
-   * Companion to `applyStatusChange` for callers that pass their own
-   * `manager`: call this after your own transaction has committed, with the
-   * `order`/`fromStatus` that call returned, to send the status-change
-   * email only once the change is actually durable.
+   * Moves an order along with its shipment, inside the shipment's
+   * transaction, applying the stock side of each step:
+   * - processing -> shipped: the reservation leaves the warehouse
+   *   (a re-attempt after delivery_failed ships nothing new)
+   * - -> delivered: starts the return window
+   * - -> returned_to_sender: the goods are back on sale; the outbox event
+   *   lets payments return the money
    */
-  notifyOrderStatusChanged(order: Order, fromStatus: OrderStatus | null): void {
-    if (fromStatus !== null) {
-      void this.notifyOrderStatusUpdate(order, fromStatus);
+  async applyShipmentProgress(
+    manager: EntityManager,
+    orderId: string,
+    toStatus: OrderStatus,
+    actor: {
+      actorType: OrderStatusChangeActor;
+      actorId?: string;
+      note?: string;
+    },
+  ): Promise<Order> {
+    const order = await manager.findOne(Order, {
+      where: { id: orderId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.status === toStatus) return order;
+
+    this.orderPolicy.assertShipmentTransition(order.status, toStatus);
+    const fromStatus = order.status;
+
+    if (
+      fromStatus === OrderStatus.PROCESSING &&
+      toStatus === OrderStatus.SHIPPED
+    ) {
+      await this.shipStock(manager, order, actor.actorId);
     }
+    if (toStatus === OrderStatus.DELIVERED) {
+      order.deliveredAt = new Date();
+    }
+    if (toStatus === OrderStatus.RETURNED_TO_SENDER) {
+      const items = await this.loadItems(manager, order);
+      await this.inventoryService.restock(manager, this.stockLines(items), {
+        refType: 'order',
+        refId: order.id,
+        actorId: actor.actorId ?? null,
+        note: 'Returned to sender',
+      });
+    }
+
+    order.status = toStatus;
+    await manager.save(Order, order);
+    await this.recordStatusChange(manager, {
+      orderId,
+      fromStatus,
+      toStatus,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      note: actor.note,
+    });
+    return order;
+  }
+
+  /**
+   * Ids of delivered orders whose return window has ended and that have no
+   * refund request still waiting. Pre-filter for `completeDelivered`.
+   */
+  async findCompletableOrderIds(cutoff: Date, limit = 200): Promise<string[]> {
+    const rows = await this.orderRepo
+      .createQueryBuilder('o')
+      .select('o.id', 'id')
+      .where('o.status = :delivered', { delivered: OrderStatus.DELIVERED })
+      .andWhere('o.deliveredAt < :cutoff', { cutoff })
+      .andWhere(
+        `NOT EXISTS (
+          SELECT 1 FROM "refund_requests" r
+          WHERE r."order_id" = o."id" AND r."status" = 'pending'
+        )`,
+      )
+      .orderBy('o.deliveredAt', 'ASC')
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+    return rows.map((r) => r.id);
+  }
+
+  /** Closes one order whose return window passed. Re-checked under lock. */
+  async completeDelivered(orderId: string, cutoff: Date): Promise<boolean> {
+    return this.dataSource.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { id: orderId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (
+        !order ||
+        !this.orderPolicy.isCompletable(order, cutoff) ||
+        (await this.hasPendingRefundRequest(manager, orderId))
+      ) {
+        return false;
+      }
+
+      order.status = OrderStatus.COMPLETED;
+      order.completedAt = new Date();
+      await manager.save(Order, order);
+      await this.recordStatusChange(manager, {
+        orderId,
+        fromStatus: OrderStatus.DELIVERED,
+        toStatus: OrderStatus.COMPLETED,
+        actorType: OrderStatusChangeActor.SYSTEM,
+        note: 'Return window ended',
+      });
+      return true;
+    });
+  }
+
+  private async hasPendingRefundRequest(
+    manager: EntityManager,
+    orderId: string,
+  ): Promise<boolean> {
+    const rows: unknown[] = await manager.query(
+      `SELECT 1 FROM "refund_requests" WHERE "order_id" = $1 AND "status" = 'pending' LIMIT 1`,
+      [orderId],
+    );
+    return rows.length > 0;
   }
 
   async getStatusHistory(
@@ -979,6 +1102,29 @@ export class OrdersService {
         note: params.note ?? null,
       }),
     );
+
+    // Every status change funnels through here, so this is the one place
+    // its side effects are published (in the same transaction).
+    if (params.fromStatus !== null) {
+      await this.outboxService.enqueue(manager, {
+        type: OrderEvents.STATUS_CHANGED,
+        aggregateType: 'order',
+        aggregateId: params.orderId,
+        payload: {
+          orderId: params.orderId,
+          fromStatus: params.fromStatus,
+          toStatus: params.toStatus,
+        },
+      });
+    }
+    if (params.toStatus === OrderStatus.RETURNED_TO_SENDER) {
+      await this.outboxService.enqueue(manager, {
+        type: OrderEvents.RETURNED_TO_SENDER,
+        aggregateType: 'order',
+        aggregateId: params.orderId,
+        payload: { orderId: params.orderId },
+      });
+    }
   }
 
   private async assertNotPaid(
@@ -1080,54 +1226,6 @@ export class OrdersService {
     }
   }
 
-  private async notifyOrderConfirmation(order: Order): Promise<void> {
-    try {
-      const user = await this.usersService.findById(order.user_id);
-      if (!user) return;
-
-      await this.mailService.sendOrderConfirmation(user.email, {
-        orderNumber: order.orderNumber,
-        items: order.items.map((item) => ({
-          productName: item.productName,
-          variantName: item.variantName,
-          quantity: item.quantity,
-          unitPrice: Number(item.unitPrice),
-          total: Number(item.total),
-        })),
-        subtotal: Number(order.subtotal),
-        shippingFee: Number(order.shippingFee),
-        discount: Number(order.discount),
-        total: Number(order.total),
-      });
-    } catch (error) {
-      this.logger.error(
-        `Failed to notify order confirmation for order ${order.orderNumber}`,
-        error instanceof Error ? error.stack : error,
-      );
-    }
-  }
-
-  private async notifyOrderStatusUpdate(
-    order: Order,
-    fromStatus: OrderStatus | null,
-  ): Promise<void> {
-    try {
-      const user = await this.usersService.findById(order.user_id);
-      if (!user) return;
-
-      await this.mailService.sendOrderStatusUpdate(user.email, {
-        orderNumber: order.orderNumber,
-        fromStatus,
-        toStatus: order.status,
-      });
-    } catch (error) {
-      this.logger.error(
-        `Failed to notify order status update for order ${order.orderNumber}`,
-        error instanceof Error ? error.stack : error,
-      );
-    }
-  }
-
   private generateOrderNumber(): string {
     const date = new Date();
     const datePart = date.toISOString().slice(0, 10).replace(/-/g, '');
@@ -1144,6 +1242,8 @@ export class OrdersService {
     fields: {
       user_id: string;
       address_id: string;
+      shippingAddress: Order['shippingAddress'];
+      idempotencyKey: string | null;
       status: OrderStatus;
       subtotal: number;
       shippingFee: number;
@@ -1182,6 +1282,12 @@ export class OrdersService {
 
     // Unreachable: the loop above always returns or throws.
     throw new Error('Failed to generate a unique order number');
+  }
+
+  private isIdempotencyConflict(error: unknown): boolean {
+    if (!(error instanceof QueryFailedError)) return false;
+    const driverError = error as QueryFailedError & { constraint?: string };
+    return driverError.constraint === 'UQ_orders_user_idempotency_key';
   }
 
   private isOrderNumberCollision(error: unknown): boolean {

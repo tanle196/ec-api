@@ -80,9 +80,25 @@ describe('OrderPolicy', () => {
     expect(() =>
       policy.assertCanTransition(OrderStatus.PENDING, OrderStatus.CONFIRMED),
     ).not.toThrow();
+    // Shipping statuses come from the shipment, not by hand.
     expect(() =>
       policy.assertCanTransition(OrderStatus.SHIPPED, OrderStatus.DELIVERED),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      policy.assertShipmentTransition(
+        OrderStatus.SHIPPED,
+        OrderStatus.DELIVERED,
+      ),
     ).not.toThrow();
+    expect(() =>
+      policy.assertShipmentTransition(
+        OrderStatus.DELIVERY_FAILED,
+        OrderStatus.RETURNED_TO_SENDER,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      policy.assertShipmentTransition(OrderStatus.PENDING, OrderStatus.SHIPPED),
+    ).toThrow(BadRequestException);
     expect(() =>
       policy.assertCanTransition(OrderStatus.SHIPPED, OrderStatus.PENDING),
     ).toThrow(BadRequestException);

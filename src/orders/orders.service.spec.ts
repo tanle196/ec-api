@@ -114,13 +114,7 @@ describe('OrdersService', () => {
       getAppConfig: () => ({ shippingFlatFee: SHIPPING }),
     };
     const cartsService = { getCart: jest.fn() };
-    const mailService = {
-      sendOrderConfirmation: jest.fn().mockResolvedValue(undefined),
-      sendOrderStatusUpdate: jest.fn().mockResolvedValue(undefined),
-    };
-    const usersService = {
-      findById: jest.fn().mockResolvedValue({ email: 'a@example.com' }),
-    };
+    const outboxService = { enqueue: jest.fn().mockResolvedValue(undefined) };
     const inventoryService = {
       reserve: jest.fn().mockResolvedValue(undefined),
       release: jest.fn().mockResolvedValue(undefined),
@@ -137,10 +131,9 @@ describe('OrdersService', () => {
       discountsService as never,
       configService as never,
       cartsService as never,
-      mailService as never,
-      usersService as never,
       new OrderPolicy(),
       inventoryService as never,
+      outboxService as never,
     );
     jest.spyOn(service['logger'], 'warn').mockImplementation(() => undefined);
     jest.spyOn(service['logger'], 'error').mockImplementation(() => undefined);
@@ -159,12 +152,20 @@ describe('OrdersService', () => {
       dataSource,
       discountsService,
       cartsService,
-      mailService,
-      usersService,
+      outboxService,
     };
   };
 
   const flush = () => new Promise((r) => setImmediate(r));
+
+  // Outbox events published in the operation's transaction, by type.
+  const published = (
+    ctx: { outboxService: { enqueue: jest.Mock } },
+    type: string,
+  ) =>
+    (ctx.outboxService.enqueue.mock.calls as [unknown, { type: string }][])
+      .filter(([, e]) => e.type === type)
+      .map(([manager, e]) => ({ manager, ...e }));
 
   const savedCalls = (manager: { save: jest.Mock }, entity: unknown) =>
     manager.save.mock.calls
@@ -353,27 +354,98 @@ describe('OrdersService', () => {
       expect(items[0].paidAmount + items[1].paidAmount).toBe(order.total);
     });
 
-    it('sends the confirmation email after creating', async () => {
+    it('publishes order.placed in the same transaction (no status-changed event)', async () => {
       const ctx = buildService();
 
       await ctx.service.create('user-1', dto);
-      await flush();
 
-      expect(ctx.mailService.sendOrderConfirmation).toHaveBeenCalledWith(
-        'a@example.com',
-        expect.objectContaining({ subtotal: 59.97, total: 64.97 }),
-      );
+      expect(published(ctx, 'order.placed')).toEqual([
+        {
+          manager: ctx.manager,
+          type: 'order.placed',
+          aggregateType: 'order',
+          aggregateId: 'order-1',
+          payload: { orderId: 'order-1' },
+        },
+      ]);
+      expect(published(ctx, 'order.status_changed')).toEqual([]);
     });
 
-    it('does not fail the order when the email fails', async () => {
+    it('snapshots the delivery address onto the order', async () => {
       const ctx = buildService();
-      ctx.mailService.sendOrderConfirmation.mockRejectedValue(
-        new Error('smtp'),
-      );
+      ctx.addressRepo.findOne.mockResolvedValue({
+        id: 'address-1',
+        fullName: 'An',
+        phone: '0900',
+        addressLine1: '1 Lê Lợi',
+        addressLine2: null,
+        city: 'Q1',
+        province: 'HCM',
+        country: 'VN',
+        postalCode: null,
+        isDefault: true,
+      });
 
-      await expect(ctx.service.create('user-1', dto)).resolves.toBeDefined();
-      await flush();
-      expect(jest.spyOn(ctx.service['logger'], 'error')).toHaveBeenCalled();
+      await ctx.service.create('user-1', dto);
+
+      expect(savedCalls(ctx.manager, Order)[0].shippingAddress).toEqual({
+        fullName: 'An',
+        phone: '0900',
+        addressLine1: '1 Lê Lợi',
+        addressLine2: null,
+        city: 'Q1',
+        province: 'HCM',
+        country: 'VN',
+        postalCode: null,
+      });
+    });
+
+    describe('idempotency key', () => {
+      it('returns the order an earlier request with the same key placed', async () => {
+        const ctx = buildService();
+        ctx.state.order = { id: 'order-9', items: [] };
+        const findOne = jest.fn().mockResolvedValue({ id: 'order-9' });
+        Object.assign(ctx.orderRepo, { findOne });
+
+        const order = await ctx.service.create('user-1', dto, 'key-1');
+
+        expect(findOne).toHaveBeenCalledWith({
+          where: { user_id: 'user-1', idempotencyKey: 'key-1' },
+        });
+        expect(order).toEqual(expect.objectContaining({ id: 'order-9' }));
+        expect(ctx.dataSource.transaction).not.toHaveBeenCalled();
+      });
+
+      it('stores the key on a new order', async () => {
+        const ctx = buildService();
+        Object.assign(ctx.orderRepo, {
+          findOne: jest.fn().mockResolvedValue(null),
+        });
+
+        await ctx.service.create('user-1', dto, 'key-1');
+
+        expect(savedCalls(ctx.manager, Order)[0].idempotencyKey).toBe('key-1');
+      });
+
+      it('returns the winner when a concurrent request with the key commits first', async () => {
+        const ctx = buildService();
+        const findOne = jest
+          .fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({ id: 'order-7' });
+        Object.assign(ctx.orderRepo, { findOne });
+        ctx.dataSource.transaction.mockRejectedValueOnce(
+          Object.assign(new QueryFailedError('INSERT', [], new Error('dup')), {
+            code: '23505',
+            constraint: 'UQ_orders_user_idempotency_key',
+          }),
+        );
+        ctx.state.order = { id: 'order-7', items: [] };
+
+        await expect(
+          ctx.service.create('user-1', dto, 'key-1'),
+        ).resolves.toEqual(expect.objectContaining({ id: 'order-7' }));
+      });
     });
 
     it("rejects an address that isn't the user's before reading items", async () => {
@@ -415,8 +487,7 @@ describe('OrdersService', () => {
       await expect(ctx.service.create('user-1', dto)).rejects.toThrow(
         'Insufficient stock for variant SKU-A',
       );
-      await flush();
-      expect(ctx.mailService.sendOrderConfirmation).not.toHaveBeenCalled();
+      expect(ctx.outboxService.enqueue).not.toHaveBeenCalled();
     });
 
     describe('order number collisions', () => {
@@ -691,6 +762,7 @@ describe('OrdersService', () => {
       expect(ctx.inventoryService.reserve).not.toHaveBeenCalled();
       expect(ctx.manager.update).toHaveBeenCalledWith(Order, 'order-1', {
         address_id: 'address-2',
+        shippingAddress: expect.objectContaining({}) as unknown,
         notes: 'leave at door',
         subtotal: 19.99,
         discount: 0,
@@ -843,14 +915,17 @@ describe('OrdersService', () => {
             changedById: 'user-1',
           }),
         );
-        expect(ctx.mailService.sendOrderStatusUpdate).toHaveBeenCalledWith(
-          'a@example.com',
-          {
-            orderNumber: 'ORD-1',
-            fromStatus: status,
-            toStatus: OrderStatus.CANCELLED,
-          },
-        );
+        expect(published(ctx, 'order.status_changed')).toEqual([
+          expect.objectContaining({
+            manager: ctx.manager,
+            aggregateId: 'order-1',
+            payload: {
+              orderId: 'order-1',
+              fromStatus: status,
+              toStatus: OrderStatus.CANCELLED,
+            },
+          }),
+        ]);
       },
     );
 
@@ -927,8 +1002,6 @@ describe('OrdersService', () => {
     it.each([
       [OrderStatus.PENDING, OrderStatus.CONFIRMED],
       [OrderStatus.CONFIRMED, OrderStatus.PROCESSING],
-      [OrderStatus.PROCESSING, OrderStatus.SHIPPED],
-      [OrderStatus.SHIPPED, OrderStatus.DELIVERED],
     ])('allows %s -> %s', async (from, to) => {
       const ctx = buildService();
       ctx.state.order = { id: 'order-1', status: from, items: [] };
@@ -950,76 +1023,6 @@ describe('OrdersService', () => {
         }),
       );
       expect(ctx.inventoryService.release).not.toHaveBeenCalled();
-    });
-
-    it('consumes the reservation and snapshots unit cost when shipping', async () => {
-      const ctx = buildService();
-      ctx.state.order = {
-        id: 'order-1',
-        status: OrderStatus.PROCESSING,
-        items: [
-          { id: 'item-1', variant_id: 'variant-a', quantity: 2 },
-          { id: 'item-2', variant_id: null, quantity: 1 },
-        ],
-      };
-      ctx.inventoryService.ship.mockResolvedValue(new Map([['variant-a', 85]]));
-
-      await ctx.service.updateStatus(
-        'order-1',
-        { status: OrderStatus.SHIPPED },
-        admin,
-      );
-
-      expect(ctx.inventoryService.ship).toHaveBeenCalledWith(
-        ctx.manager,
-        [{ variantId: 'variant-a', quantity: 2 }],
-        { refType: 'order', refId: 'order-1', actorId: 'admin-1' },
-      );
-      expect(ctx.manager.update).toHaveBeenCalledWith(OrderItem, 'item-1', {
-        unitCost: 85,
-      });
-      expect(ctx.manager.update).not.toHaveBeenCalledWith(
-        OrderItem,
-        'item-2',
-        expect.anything(),
-      );
-    });
-
-    it('does not touch stock for transitions other than ship/cancel', async () => {
-      const ctx = buildService();
-      ctx.state.order = {
-        id: 'order-1',
-        status: OrderStatus.SHIPPED,
-        items: [{ id: 'item-1', variant_id: 'variant-a', quantity: 2 }],
-      };
-
-      await ctx.service.updateStatus(
-        'order-1',
-        { status: OrderStatus.DELIVERED },
-        admin,
-      );
-
-      expect(ctx.inventoryService.ship).not.toHaveBeenCalled();
-      expect(ctx.inventoryService.release).not.toHaveBeenCalled();
-    });
-
-    it.each([
-      [OrderStatus.SHIPPED, OrderStatus.PENDING],
-      [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
-      [OrderStatus.CANCELLED, OrderStatus.CONFIRMED],
-      [OrderStatus.REFUNDED, OrderStatus.DELIVERED],
-      [OrderStatus.PENDING, OrderStatus.SHIPPED],
-      // Refund statuses are only set by the payment refund flow.
-      [OrderStatus.DELIVERED, OrderStatus.REFUNDED],
-      [OrderStatus.DELIVERED, OrderStatus.PARTIALLY_REFUNDED],
-      [OrderStatus.PARTIALLY_REFUNDED, OrderStatus.REFUNDED],
-    ])('rejects %s -> %s', async (from, to) => {
-      const ctx = buildService();
-      ctx.state.order = { id: 'order-1', status: from };
-
-      await expect(
-        ctx.service.updateStatus('order-1', { status: to }, admin),
-      ).rejects.toThrow(`Cannot transition order from "${from}" to "${to}"`);
     });
 
     it('restores stock when cancelling', async () => {
@@ -1196,7 +1199,7 @@ describe('OrdersService', () => {
           changedById: null,
         }),
       );
-      expect(ctx.mailService.sendOrderStatusUpdate).toHaveBeenCalled();
+      expect(published(ctx, 'order.status_changed')).toHaveLength(1);
     });
 
     it.each([
@@ -1245,6 +1248,181 @@ describe('OrdersService', () => {
       await expect(ctx.service.expireUnpaid('nope', cutoff)).resolves.toBe(
         false,
       );
+    });
+  });
+
+  describe('applyShipmentProgress', () => {
+    const admin = {
+      actorType: OrderStatusChangeActor.ADMIN,
+      actorId: 'admin-1',
+    };
+    const progress = (ctx: ReturnType<typeof buildService>, to: OrderStatus) =>
+      ctx.service.applyShipmentProgress(
+        ctx.manager as never,
+        'order-1',
+        to,
+        admin,
+      );
+
+    it('ships the reservation and snapshots unit cost on hand-over', async () => {
+      const ctx = buildService();
+      ctx.state.order = {
+        id: 'order-1',
+        status: OrderStatus.PROCESSING,
+        items: [
+          { id: 'item-1', variant_id: 'variant-a', quantity: 2 },
+          { id: 'item-2', variant_id: null, quantity: 1 },
+        ],
+      };
+      ctx.inventoryService.ship.mockResolvedValue(new Map([['variant-a', 85]]));
+
+      await progress(ctx, OrderStatus.SHIPPED);
+
+      expect(ctx.inventoryService.ship).toHaveBeenCalledWith(
+        ctx.manager,
+        [{ variantId: 'variant-a', quantity: 2 }],
+        { refType: 'order', refId: 'order-1', actorId: 'admin-1' },
+      );
+      expect(ctx.manager.update).toHaveBeenCalledWith(OrderItem, 'item-1', {
+        unitCost: 85,
+      });
+      expect(ctx.state.order.status).toBe(OrderStatus.SHIPPED);
+      expect(published(ctx, 'order.status_changed')).toHaveLength(1);
+    });
+
+    it('ships nothing again on a re-attempt after a failed delivery', async () => {
+      const ctx = buildService();
+      ctx.state.order = {
+        id: 'order-1',
+        status: OrderStatus.DELIVERY_FAILED,
+        items: [{ id: 'item-1', variant_id: 'variant-a', quantity: 2 }],
+      };
+
+      await progress(ctx, OrderStatus.SHIPPED);
+
+      expect(ctx.inventoryService.ship).not.toHaveBeenCalled();
+      expect(ctx.state.order.status).toBe(OrderStatus.SHIPPED);
+    });
+
+    it('starts the return window on delivery', async () => {
+      const ctx = buildService();
+      ctx.state.order = {
+        id: 'order-1',
+        status: OrderStatus.SHIPPED,
+        items: [],
+      };
+
+      await progress(ctx, OrderStatus.DELIVERED);
+
+      expect(ctx.state.order.deliveredAt).toBeInstanceOf(Date);
+      expect(ctx.inventoryService.ship).not.toHaveBeenCalled();
+    });
+
+    it('puts returned goods back on sale and publishes the refund trigger', async () => {
+      const ctx = buildService();
+      ctx.state.order = {
+        id: 'order-1',
+        status: OrderStatus.DELIVERY_FAILED,
+        items: [{ id: 'item-1', variant_id: 'variant-a', quantity: 2 }],
+      };
+      const restock = jest.fn().mockResolvedValue(undefined);
+      Object.assign(ctx.inventoryService, { restock });
+
+      await progress(ctx, OrderStatus.RETURNED_TO_SENDER);
+
+      expect(restock).toHaveBeenCalledWith(
+        ctx.manager,
+        [{ variantId: 'variant-a', quantity: 2 }],
+        expect.objectContaining({ refType: 'order', refId: 'order-1' }),
+      );
+      expect(published(ctx, 'order.returned_to_sender')).toEqual([
+        expect.objectContaining({
+          manager: ctx.manager,
+          payload: { orderId: 'order-1' },
+        }),
+      ]);
+    });
+
+    it('refuses moves a shipment cannot cause', async () => {
+      const ctx = buildService();
+      ctx.state.order = { id: 'order-1', status: OrderStatus.PENDING };
+
+      await expect(progress(ctx, OrderStatus.SHIPPED)).rejects.toThrow(
+        'Cannot move order from "pending" to "shipped" by shipment',
+      );
+    });
+
+    it('is a no-op when the order is already there (repeated carrier update)', async () => {
+      const ctx = buildService();
+      ctx.state.order = { id: 'order-1', status: OrderStatus.SHIPPED };
+
+      await progress(ctx, OrderStatus.SHIPPED);
+
+      expect(ctx.manager.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('completeDelivered', () => {
+    const cutoff = new Date('2026-11-21T00:00:00Z');
+
+    it('completes a delivered order past the return window', async () => {
+      const ctx = buildService();
+      ctx.state.order = {
+        id: 'order-1',
+        status: OrderStatus.DELIVERED,
+        deliveredAt: new Date('2026-11-10T00:00:00Z'),
+      };
+      ctx.manager.query.mockResolvedValue([]);
+
+      await expect(
+        ctx.service.completeDelivered('order-1', cutoff),
+      ).resolves.toBe(true);
+
+      expect(ctx.state.order.status).toBe(OrderStatus.COMPLETED);
+      expect(ctx.state.order.completedAt).toBeInstanceOf(Date);
+      expect(savedCalls(ctx.manager, OrderStatusHistory)[0]).toEqual(
+        expect.objectContaining({
+          fromStatus: OrderStatus.DELIVERED,
+          toStatus: OrderStatus.COMPLETED,
+          changedByType: OrderStatusChangeActor.SYSTEM,
+        }),
+      );
+    });
+
+    it('waits while a refund request is pending', async () => {
+      const ctx = buildService();
+      ctx.state.order = {
+        id: 'order-1',
+        status: OrderStatus.DELIVERED,
+        deliveredAt: new Date('2026-11-10T00:00:00Z'),
+      };
+      ctx.manager.query.mockResolvedValue([{ '?column?': 1 }]);
+
+      await expect(
+        ctx.service.completeDelivered('order-1', cutoff),
+      ).resolves.toBe(false);
+      expect(ctx.state.order.status).toBe(OrderStatus.DELIVERED);
+    });
+
+    it.each([
+      [
+        'still inside the window',
+        { deliveredAt: new Date('2026-11-25T00:00:00Z') },
+      ],
+      ['not delivered', { status: OrderStatus.SHIPPED }],
+    ])('leaves an order alone when %s', async (_label, overrides) => {
+      const ctx = buildService();
+      ctx.state.order = {
+        id: 'order-1',
+        status: OrderStatus.DELIVERED,
+        deliveredAt: new Date('2026-11-10T00:00:00Z'),
+        ...overrides,
+      };
+      ctx.manager.query.mockResolvedValue([]);
+
+      await expect(
+        ctx.service.completeDelivered('order-1', cutoff),
+      ).resolves.toBe(false);
     });
   });
 
@@ -1377,10 +1555,10 @@ describe('OrdersService', () => {
           note: 'paid',
         }),
       );
-      expect(ctx.mailService.sendOrderStatusUpdate).toHaveBeenCalled();
+      expect(published(ctx, 'order.status_changed')).toHaveLength(1);
     });
 
-    it("uses the caller's manager and leaves notifying to the caller", async () => {
+    it("uses the caller's manager for the change and its event", async () => {
       const ctx = buildService();
       ctx.state.order = { id: 'order-1', status: OrderStatus.PENDING };
 
@@ -1393,7 +1571,9 @@ describe('OrdersService', () => {
       await flush();
 
       expect(ctx.dataSource.transaction).not.toHaveBeenCalled();
-      expect(ctx.mailService.sendOrderStatusUpdate).not.toHaveBeenCalled();
+      expect(published(ctx, 'order.status_changed')[0].manager).toBe(
+        ctx.manager,
+      );
     });
 
     it('is a no-op when the order already has the target status', async () => {
@@ -1448,34 +1628,6 @@ describe('OrdersService', () => {
       await expect(
         ctx.service.applyStatusChange('x', OrderStatus.CONFIRMED, system),
       ).rejects.toThrow(NotFoundException);
-    });
-  });
-
-  describe('notifyOrderStatusChanged', () => {
-    it('notifies only when a change actually happened', async () => {
-      const ctx = buildService();
-      const order = { user_id: 'user-1', orderNumber: 'ORD-1', status: 'x' };
-
-      ctx.service.notifyOrderStatusChanged(order as never, null);
-      await flush();
-      expect(ctx.mailService.sendOrderStatusUpdate).not.toHaveBeenCalled();
-
-      ctx.service.notifyOrderStatusChanged(order as never, OrderStatus.PENDING);
-      await flush();
-      expect(ctx.mailService.sendOrderStatusUpdate).toHaveBeenCalled();
-    });
-
-    it('skips users that no longer exist', async () => {
-      const ctx = buildService();
-      ctx.usersService.findById.mockResolvedValue(null);
-
-      ctx.service.notifyOrderStatusChanged(
-        { user_id: 'gone' } as never,
-        OrderStatus.PENDING,
-      );
-      await flush();
-
-      expect(ctx.mailService.sendOrderStatusUpdate).not.toHaveBeenCalled();
     });
   });
 

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Order } from '@/orders/entities/order.entity';
 import { OrdersModule } from '@/orders/orders.module';
+import { OutboxModule } from '@/outbox/outbox.module';
 import { UsersModule } from '@/users/users.module';
 import { MailModule } from '@/mail/mail.module';
 import { PaymentIssue } from './entities/payment-issue.entity';
@@ -21,6 +22,7 @@ import { VnpayIpnService } from './gateways/vnpay/vnpay-ipn.service';
 import { AdminPaymentOperationsController } from './admin-payment-operations.controller';
 import { PaymentIssuesService } from './payment-issues.service';
 import { PaymentReconciliationService } from './payment-reconciliation.service';
+import { OrderReturnedHandler } from './order-returned.handler';
 import { PaymentsController } from './payments.controller';
 import { PaymentWebhooksController } from './payment-webhooks.controller';
 import { AdminPaymentsController } from './admin-payments.controller';
@@ -45,6 +47,7 @@ import { RefundRequestPolicy } from './policies/refund-request.policy';
       RefundRequestItem,
     ]),
     OrdersModule,
+    OutboxModule,
     UsersModule,
     MailModule,
   ],
@@ -70,6 +73,7 @@ import { RefundRequestPolicy } from './policies/refund-request.policy';
     VnpayIpnService,
     PaymentIssuesService,
     PaymentReconciliationService,
+    OrderReturnedHandler,
     {
       provide: PAYMENT_GATEWAY_PROVIDERS,
       // VNPay is only offered once its merchant credentials are configured.

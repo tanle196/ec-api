@@ -9,6 +9,9 @@ const appConfig = registerAs(ConfigModules.App, () => ({
   // this many minutes. 0 turns expiry off.
   pendingOrderTtlMinutes: Number(process.env.PENDING_ORDER_TTL_MINUTES ?? 30),
   codMaxOrderTotal: Number(process.env.COD_MAX_ORDER_TOTAL ?? 0),
+  // Days after delivery a customer can still ask for a return/refund;
+  // the order is completed after that.
+  returnWindowDays: Number(process.env.RETURN_WINDOW_DAYS ?? 7),
 }));
 
 export type AppConfig = ConfigType<typeof appConfig>;

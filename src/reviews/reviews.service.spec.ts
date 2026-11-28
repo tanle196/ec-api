@@ -87,9 +87,12 @@ describe('ReviewsService', () => {
       expect(orderQb.where).toHaveBeenCalledWith('o.user_id = :userId', {
         userId: 'user-1',
       });
-      expect(orderQb.andWhere).toHaveBeenCalledWith('o.status = :status', {
-        status: OrderStatus.DELIVERED,
-      });
+      expect(orderQb.andWhere).toHaveBeenCalledWith(
+        'o.status IN (:...statuses)',
+        {
+          statuses: [OrderStatus.DELIVERED, OrderStatus.COMPLETED],
+        },
+      );
       expect(orderQb.andWhere).toHaveBeenCalledWith(
         'v.product_id = :productId',
         { productId: 'product-1' },
