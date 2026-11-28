@@ -44,4 +44,37 @@ export class OrderItem extends AbstractIdEntity {
     transformer: moneyTransformer,
   })
   total!: number;
+
+  // Share of the order's discount taken off this line. Lines outside a
+  // scoped code's reach get 0.
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: moneyTransformer,
+  })
+  discountAmount!: number;
+
+  // Share of the order's shipping fee carried by this line.
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: moneyTransformer,
+  })
+  shippingAmount!: number;
+
+  // What the customer actually paid for this line:
+  // total - discountAmount + shippingAmount. Summed over an order's lines it
+  // equals order.total exactly, so refunds can be computed per line.
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: moneyTransformer,
+  })
+  paidAmount!: number;
 }

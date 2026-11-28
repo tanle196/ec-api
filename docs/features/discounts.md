@@ -14,15 +14,21 @@
 - `value` must be a positive number; interpreted as a percentage (0–100) for `percent` type, or a fixed VND amount for `fixed` type.
 - `minOrderValue` (optional): minimum subtotal required to apply the code; if the subtotal is below this, validation fails.
 - `usageLimit` (optional, `null` = unlimited): maximum number of times a code can be used in total; enforced via `usedCount >= usageLimit`.
-- `usedCount` increments by 1 each time a discount is successfully applied to an order (`incrementUsedCount`); not decremented on order cancellation/refund.
+- `usedCount` increments by 1 each time a discount is applied to an order (`redeem`), and every use is recorded as a `discount_redemptions` row (`active`). Cancelling the order (customer or admin) releases its redemptions (`released`) and decrements `usedCount` (`releaseForOrder`), giving the use back. A refund does **not** release the use.
+- `perUserLimit` (optional, `null` = unlimited): max `active` redemptions per customer. Checked early in `resolveCode`/`validate`, and again inside the order transaction after the `usedCount` update has locked the discount row, so concurrent orders from one customer can't both slip past it.
+- Scope (`productIds`, `categoryIds`, optional): when both are empty the code applies to the whole order. Otherwise only lines whose product is listed, or whose category is listed or is a descendant of a listed one, are discounted. A scoped code that matches no line is rejected (`400 Discount code "<code>" does not apply to any item in this order`).
+- `maxDiscountAmount` (optional): caps what a `percent` code can take off. Ignored for `fixed` codes.
 - `isActive` flag: inactive codes are rejected (`BadRequestException`).
 - `startsAt` / `expiresAt` (optional): code is invalid before `startsAt` and after `expiresAt`.
-- Percent discount amount = `round(subtotal * value / 100)`.
-- Fixed discount amount = `min(round(value), subtotal)` — never exceeds the subtotal.
+- `minOrderValue` is checked against the whole order subtotal; the amount is computed on the eligible lines only (`quote`):
+  - Percent amount = `min(round(eligible * value / 100), maxDiscountAmount)`.
+  - Fixed amount = `value`.
+  - Either way capped at the eligible amount, so no line can go below 0.
+- The amount is allocated across the eligible lines in proportion to their totals (`allocateProportionally`); the rounding residual goes to the largest line, so the line shares always sum exactly to the discount. Orders persist each line's share as `order_items.discountAmount`.
 - A discount can be linked to multiple orders and an order can have multiple discounts (many-to-many via `order_discount` join table), though the current checkout flow (`Orders` module) only applies a single `discountCode` per order.
 - When a pending order is edited (items changed), each already-applied discount's `minOrderValue` is re-checked against the recalculated subtotal; if no longer met, a `BadRequestException` is thrown (see `OrdersService`).
 - Discount CRUD endpoints require authentication (`JwtAuthGuard`) plus fine-grained permissions (`PermissionsGuard` + `@Permissions('discount.create' | 'discount.read' | 'discount.update' | 'discount.delete')`).
-- The client `validate` endpoint requires authentication only (`JwtAuthGuard`), no special permission.
+- The client `validate` endpoint requires authentication only (`JwtAuthGuard`), no special permission. It accepts either `items` (priced from current variant prices) or a bare `subtotal`; scoped codes require `items`.
 
 ---
 
@@ -358,5 +364,4 @@ None. TODO: no event emitters (e.g. EventEmitter2/queue) found in `src/discounts
 - All monetary values (`value`, `minOrderValue`) are stored as `decimal` columns and coerced to `Number` in service logic before arithmetic.
 - Discount amounts are always rounded (`Math.round`) and fixed-type discounts are capped at the subtotal, so a fixed discount can never make the order total negative.
 - `resolveCode` and `computeAmount` are public service methods explicitly intended for reuse by `OrdersService` (see inline comment in `discounts.service.ts`), rather than duplicating validation logic there.
-- `usedCount` is only ever incremented, never decremented — order cancellation/refund does not appear to release usage slots (TODO: confirm intended behavior if this matters for business rules).
 - The `Discount.orders` relation and `order_discount` join table support multiple discounts per order at the schema level, but current DTOs (`CreateOrderDto`, `CheckoutDto`) only accept a single `discountCode`.

@@ -21,6 +21,14 @@ export class OrderItemResponseDto {
   @ApiProperty() unitPrice!: number;
   @ApiProperty() quantity!: number;
   @ApiProperty() total!: number;
+  @ApiProperty({ description: 'Share of the order discount on this line' })
+  discountAmount!: number;
+  @ApiProperty({ description: 'Share of the shipping fee on this line' })
+  shippingAmount!: number;
+  @ApiProperty({
+    description: 'What was paid for this line (total - discount + shipping)',
+  })
+  paidAmount!: number;
 }
 
 export class OrderResponseDto {

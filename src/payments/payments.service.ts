@@ -7,12 +7,13 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import Big from 'big.js';
+import { amountForUnits } from '@/common/utils/allocation.util';
 import { Order } from '@/orders/entities/order.entity';
 import { OrderStatus } from '@/orders/enums/order-status.enum';
 import { OrderStatusChangeActor } from '@/orders/enums/order-status-change-actor.enum';
 import { OrdersService } from '@/orders/orders.service';
 import { PaginatedResponseDto } from '@/common/dto/pagination.dto';
-import { MONEY_DECIMAL_PLACES, toMoney } from '@/common/utils/money.util';
+import { toMoney } from '@/common/utils/money.util';
 import { OrderItem } from '@/orders/entities/order-item.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { CreateRefundDto } from './dto/create-refund.dto';
@@ -446,25 +447,17 @@ export class PaymentsService {
       COMMITTED_REFUND_STATUSES,
     );
 
-    // Item unit prices are the raw pre-discount/shipping sticker prices, but
-    // what the customer actually paid (payment.amount = order.subtotal +
-    // shippingFee - discount) folds in the flat shipping fee and any
-    // discount too. Refunding pure unitPrice*quantity per item would only
-    // ever add up to payment.amount by coincidence (shippingFee ==
-    // discount) — otherwise refunding every item either overshoots what was
-    // actually charged (discount > shippingFee) or can never reach the full
-    // payment.amount balance (shippingFee > discount), leaving the payment
-    // stuck PARTIALLY_REFUNDED forever. Prorating every item by this ratio
-    // distributes the shipping/discount adjustment proportionally across
-    // refunded items, so refunding 100% of the order's items always
-    // reconciles to exactly payment.amount (mod rounding), and a partial
-    // refund returns a fair share of that same adjustment.
-    const orderSubtotal = Number(payment.order.subtotal);
-    const proration =
-      orderSubtotal > 0
-        ? new Big(Number(payment.amount)).div(orderSubtotal)
-        : new Big(1);
-
+    // Each order item carries what the customer actually paid for it
+    // (paidAmount = total - its share of the discount + its share of
+    // shipping), fixed when the order was placed. Those sum to exactly
+    // order.total = payment.amount, so refunding every unit of every item
+    // reconciles to the full payment, and a scoped discount only reduces the
+    // refund of the lines it actually discounted.
+    //
+    // Units are priced as a slice of the line after everything already
+    // committed or reserved on it, so refunding a line in several goes
+    // adds back up to exactly its paidAmount instead of drifting by the
+    // rounding of each partial refund.
     let amount = new Big(0);
     const itemsToCreate: Partial<RefundItem>[] = [];
 
@@ -485,16 +478,19 @@ export class PaymentsService {
         refundableQty,
       );
 
-      const itemAmount = new Big(Number(orderItem.unitPrice))
-        .times(reqItem.quantity)
-        .times(proration)
-        .round(MONEY_DECIMAL_PLACES);
+      const alreadyTaken = committedQty + reservedQty;
+      const itemAmount = amountForUnits(
+        Number(orderItem.paidAmount),
+        orderItem.quantity,
+        alreadyTaken,
+        alreadyTaken + reqItem.quantity,
+      );
       amount = amount.plus(itemAmount);
 
       itemsToCreate.push({
         order_item_id: orderItem.id,
         quantity: reqItem.quantity,
-        amount: itemAmount.toNumber(),
+        amount: itemAmount,
       });
     }
 

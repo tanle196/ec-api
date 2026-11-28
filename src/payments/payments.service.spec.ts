@@ -456,6 +456,97 @@ describe('PaymentsService', () => {
     });
   });
 
+  describe('resolveRefundableItems', () => {
+    // Scoped code took 30 off the second line only; shipping 5 split 1:3.
+    const payment = {
+      id: 'payment-1',
+      order_id: 'order-1',
+      status: PaymentStatus.COMPLETED,
+      amount: 375,
+      method: PaymentMethod.STRIPE,
+      order: {
+        subtotal: 400,
+        items: [
+          {
+            id: 'item-a',
+            quantity: 1,
+            unitPrice: 100,
+            paidAmount: 101.25,
+            productName: 'A',
+          },
+          {
+            id: 'item-b',
+            quantity: 3,
+            unitPrice: 100,
+            paidAmount: 273.75,
+            productName: 'B',
+          },
+        ],
+      },
+    };
+
+    it("refunds each line's own paidAmount, not a whole-order ratio", async () => {
+      const { service, manager } = buildService();
+      manager.findOne.mockResolvedValueOnce(payment);
+
+      const { amount, itemsToCreate } = await service.resolveRefundableItems(
+        manager as never,
+        'payment-1',
+        [{ order_item_id: 'item-a', quantity: 1 }],
+      );
+
+      // The undiscounted line gets its full price + its shipping share back.
+      expect(amount).toBe(101.25);
+      expect(itemsToCreate).toEqual([
+        { order_item_id: 'item-a', quantity: 1, amount: 101.25 },
+      ]);
+    });
+
+    it('prices later partial refunds so a line adds back up exactly', async () => {
+      const amounts: number[] = [];
+      for (let taken = 0; taken < 3; taken++) {
+        const { service, manager } = buildService();
+        manager.findOne.mockResolvedValueOnce(payment);
+        manager.find.mockResolvedValueOnce(
+          taken === 0
+            ? []
+            : [{ items: [{ order_item_id: 'item-b', quantity: taken }] }],
+        );
+
+        const { amount } = await service.resolveRefundableItems(
+          manager as never,
+          'payment-1',
+          [{ order_item_id: 'item-b', quantity: 1 }],
+        );
+        amounts.push(amount);
+      }
+
+      expect(amounts).toEqual([91.25, 91.25, 91.25]);
+      expect(amounts.reduce((a, b) => a + b, 0)).toBe(273.75);
+    });
+
+    it('slices after quantities reserved by pending requests', async () => {
+      const { service, manager } = buildService();
+      manager.findOne.mockResolvedValueOnce({
+        ...payment,
+        order: {
+          ...payment.order,
+          items: [{ ...payment.order.items[1], paidAmount: 10 }],
+        },
+      });
+
+      const { amount } = await service.resolveRefundableItems(
+        manager as never,
+        'payment-1',
+        [{ order_item_id: 'item-b', quantity: 1 }],
+        new Map([['item-b', 1]]),
+      );
+
+      // 10 over 3 units: cumulative 3.33 → 6.67, so the second unit is 3.34.
+      expect(amount).toBe(3.34);
+    });
+  });
+
   describe('createRefund', () => {
     const paymentWithOrder = {
       id: 'payment-1',
@@ -470,6 +561,7 @@ describe('PaymentsService', () => {
             id: 'item-1',
             quantity: 2,
             unitPrice: 50,
+            paidAmount: 100,
             productName: 'Widget',
           },
         ],

@@ -29,6 +29,9 @@ export class OrderMapper {
     unitPrice: item.unitPrice,
     quantity: item.quantity,
     total: item.total,
+    discountAmount: item.discountAmount,
+    shippingAmount: item.shippingAmount,
+    paidAmount: item.paidAmount,
   });
 
   static toResponse = (entity: Order): OrderResponseDto => ({

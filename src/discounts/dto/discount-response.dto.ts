@@ -10,7 +10,15 @@ export class DiscountResponseDto {
   @ApiPropertyOptional({ type: Number, nullable: true })
   minOrderValue!: number | null;
   @ApiPropertyOptional({ type: Number, nullable: true })
+  maxDiscountAmount!: number | null;
+  @ApiPropertyOptional({ type: Number, nullable: true })
   usageLimit!: number | null;
+  @ApiPropertyOptional({ type: Number, nullable: true })
+  perUserLimit!: number | null;
+  @ApiPropertyOptional({ type: [String], nullable: true })
+  productIds!: string[] | null;
+  @ApiPropertyOptional({ type: [String], nullable: true })
+  categoryIds!: string[] | null;
   @ApiProperty() usedCount!: number;
   @ApiProperty() isActive!: boolean;
   @ApiPropertyOptional({ type: Date, nullable: true })

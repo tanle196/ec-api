@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayUnique,
+  IsArray,
   IsBoolean,
   IsDate,
   IsEnum,
@@ -10,6 +12,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -44,6 +47,15 @@ export class CreateDiscountDto {
   minOrderValue?: number;
 
   @ApiPropertyOptional({
+    example: 100000,
+    description: 'Cap on the amount a percent code can take off (VND)',
+  })
+  @IsNumber()
+  @IsPositive()
+  @IsOptional()
+  maxDiscountAmount?: number;
+
+  @ApiPropertyOptional({
     example: 100,
     description: 'Max total usages (null = unlimited)',
   })
@@ -51,6 +63,37 @@ export class CreateDiscountDto {
   @Min(1)
   @IsOptional()
   usageLimit?: number;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'Max usages per customer (null = unlimited)',
+  })
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  perUserLimit?: number;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Only discount these products. With categoryIds, a line qualifies if it matches either. Omit both for the whole order.',
+  })
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  @IsOptional()
+  productIds?: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Only discount products in these categories (sub-categories included)',
+  })
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  @IsOptional()
+  categoryIds?: string[];
 
   @ApiPropertyOptional({ example: true })
   @IsBoolean()

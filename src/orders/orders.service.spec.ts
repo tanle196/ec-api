@@ -26,7 +26,7 @@ describe('OrdersService', () => {
     name: 'M',
     price: '19.99',
     isActive: true,
-    product: { name: 'Áo thun' },
+    product: { id: 'product-1', name: 'Áo thun', category_id: 'cat-1' },
     ...overrides,
   });
 
@@ -103,8 +103,10 @@ describe('OrdersService', () => {
     };
     const discountsService = {
       resolveCode: jest.fn(),
-      computeAmount: jest.fn(),
-      incrementUsedCount: jest.fn().mockResolvedValue(undefined),
+      quote: jest.fn(),
+      redeem: jest.fn().mockResolvedValue(undefined),
+      releaseForOrder: jest.fn().mockResolvedValue(undefined),
+      updateRedemptionAmount: jest.fn().mockResolvedValue(undefined),
     };
     const configService = {
       getAppConfig: () => ({ shippingFlatFee: SHIPPING }),
@@ -195,6 +197,9 @@ describe('OrdersService', () => {
           unitPrice: 19.99,
           quantity: 3,
           total: 59.97,
+          discountAmount: 0,
+          shippingAmount: SHIPPING,
+          paidAmount: 64.97,
           order_id: 'order-1',
         },
       ]);
@@ -250,26 +255,89 @@ describe('OrdersService', () => {
 
     it('applies a discount code and records its usage', async () => {
       const ctx = buildService();
-      ctx.discountsService.resolveCode.mockResolvedValue({ id: 'd-1' });
-      ctx.discountsService.computeAmount.mockReturnValue(10);
+      const code = { id: 'd-1' };
+      ctx.discountsService.resolveCode.mockResolvedValue(code);
+      ctx.discountsService.quote.mockResolvedValue({
+        amount: 10,
+        lineAmounts: [10],
+      });
 
       await ctx.service.create('user-1', { ...dto, discountCode: 'SALE10' });
 
       expect(ctx.discountsService.resolveCode).toHaveBeenCalledWith(
         'SALE10',
         59.97,
+        'user-1',
+      );
+      expect(ctx.discountsService.quote).toHaveBeenCalledWith(
+        code,
+        [{ productId: 'product-1', categoryId: 'cat-1', amount: 59.97 }],
+        undefined,
       );
       expect(savedCalls(ctx.manager, Order)[0]).toEqual(
         expect.objectContaining({ discount: 10, total: 54.97 }),
       );
+      expect(savedCalls(ctx.manager, OrderItem)[0]).toEqual([
+        expect.objectContaining({
+          discountAmount: 10,
+          shippingAmount: SHIPPING,
+          paidAmount: 54.97,
+        }),
+      ]);
       expect(ctx.manager.query).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO "order_discount"'),
         ['order-1', 'd-1'],
       );
-      expect(ctx.discountsService.incrementUsedCount).toHaveBeenCalledWith(
-        ctx.manager,
-        'd-1',
-      );
+      expect(ctx.discountsService.redeem).toHaveBeenCalledWith(ctx.manager, {
+        discount: code,
+        orderId: 'order-1',
+        userId: 'user-1',
+        amount: 10,
+      });
+    });
+
+    it('allocates a scoped discount and shipping per line so lines sum to the total', async () => {
+      const ctx = buildService();
+      ctx.variantRepo.find.mockResolvedValue([
+        variant({ id: 'variant-a', price: '100.00' }),
+        variant({ id: 'variant-b', price: '300.00' }),
+      ]);
+      ctx.discountsService.resolveCode.mockResolvedValue({ id: 'd-1' });
+      // The code only covers the second line.
+      ctx.discountsService.quote.mockResolvedValue({
+        amount: 30,
+        lineAmounts: [0, 30],
+      });
+
+      await ctx.service.create('user-1', {
+        address_id: 'address-1',
+        discountCode: 'SCOPED',
+        items: [
+          { variant_id: 'variant-a', quantity: 1 },
+          { variant_id: 'variant-b', quantity: 1 },
+        ],
+      });
+
+      const items = savedCalls(ctx.manager, OrderItem)[0] as unknown as {
+        discountAmount: number;
+        shippingAmount: number;
+        paidAmount: number;
+      }[];
+      expect(items).toEqual([
+        expect.objectContaining({
+          discountAmount: 0,
+          shippingAmount: 1.25,
+          paidAmount: 101.25,
+        }),
+        expect.objectContaining({
+          discountAmount: 30,
+          shippingAmount: 3.75,
+          paidAmount: 273.75,
+        }),
+      ]);
+      const [order] = savedCalls(ctx.manager, Order);
+      expect(order.total).toBe(375);
+      expect(items[0].paidAmount + items[1].paidAmount).toBe(order.total);
     });
 
     it('sends the confirmation email after creating', async () => {
@@ -647,9 +715,12 @@ describe('OrdersService', () => {
       const ctx = buildService();
       ctx.state.order = {
         ...pendingOrder(),
-        discounts: [{ code: 'SALE', minOrderValue: null }],
+        discounts: [{ id: 'd-1', code: 'SALE', minOrderValue: null }],
       };
-      ctx.discountsService.computeAmount.mockReturnValue(4);
+      ctx.discountsService.quote.mockResolvedValue({
+        amount: 4,
+        lineAmounts: [4],
+      });
 
       await ctx.service.update('order-1', 'user-1', {
         items: [{ variant_id: 'variant-a', quantity: 2 }],
@@ -659,6 +730,15 @@ describe('OrdersService', () => {
         Order,
         'order-1',
         expect.objectContaining({ discount: 4, total: 40.98 }),
+      );
+      expect(savedCalls(ctx.manager, OrderItem)[0]).toEqual([
+        expect.objectContaining({ discountAmount: 4, paidAmount: 40.98 }),
+      ]);
+      expect(ctx.discountsService.updateRedemptionAmount).toHaveBeenCalledWith(
+        ctx.manager,
+        'order-1',
+        'd-1',
+        4,
       );
     });
 
@@ -706,6 +786,10 @@ describe('OrdersService', () => {
           { id: 'variant-a' },
           'stock',
           2,
+        );
+        expect(ctx.discountsService.releaseForOrder).toHaveBeenCalledWith(
+          ctx.manager,
+          'order-1',
         );
         expect(ctx.state.order.status).toBe(OrderStatus.CANCELLED);
         expect(savedCalls(ctx.manager, OrderStatusHistory)[0]).toEqual(
@@ -859,6 +943,27 @@ describe('OrdersService', () => {
         'stock',
         3,
       );
+      expect(ctx.discountsService.releaseForOrder).toHaveBeenCalledWith(
+        ctx.manager,
+        'order-1',
+      );
+    });
+
+    it('does not release discount uses for non-cancelling transitions', async () => {
+      const ctx = buildService();
+      ctx.state.order = {
+        id: 'order-1',
+        status: OrderStatus.PENDING,
+        items: [],
+      };
+
+      await ctx.service.updateStatus(
+        'order-1',
+        { status: OrderStatus.CONFIRMED },
+        admin,
+      );
+
+      expect(ctx.discountsService.releaseForOrder).not.toHaveBeenCalled();
     });
 
     it('refuses to cancel a paid order and leaves stock untouched', async () => {

@@ -29,8 +29,32 @@ export class Discount extends AbstractBaseEntity {
   })
   minOrderValue!: number | null;
 
+  // Cap on what a percent code can take off (e.g. 20% up to 100.000đ).
+  // Ignored for fixed codes, whose value is already the cap.
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+    transformer: moneyTransformer,
+  })
+  maxDiscountAmount!: number | null;
+
   @Column({ type: 'int', nullable: true })
   usageLimit!: number | null;
+
+  // Max active redemptions per customer (null = unlimited).
+  @Column({ type: 'int', nullable: true })
+  perUserLimit!: number | null;
+
+  // Scope: when both are null/empty the code applies to the whole order.
+  // Otherwise only to lines whose product is listed or whose category is
+  // listed (descendant categories included).
+  @Column({ type: 'uuid', array: true, nullable: true })
+  productIds!: string[] | null;
+
+  @Column({ type: 'uuid', array: true, nullable: true })
+  categoryIds!: string[] | null;
 
   @Column({ type: 'int', default: 0 })
   usedCount!: number;

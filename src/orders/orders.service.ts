@@ -16,6 +16,7 @@ import {
 import Big from 'big.js';
 import { Address } from '@/addresses/entities/address.entity';
 import { ProductVariant } from '@/products/entities/product-variant.entity';
+import { Discount } from '@/discounts/entities/discount.entity';
 import { DiscountsService } from '@/discounts/discounts.service';
 import { CartsService } from '@/carts/carts.service';
 import { CartItem } from '@/carts/entities/cart-item.entity';
@@ -41,14 +42,26 @@ import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderStatus } from './enums/order-status.enum';
 import { OrderStatusChangeActor } from './enums/order-status-change-actor.enum';
 import { OrderPolicy } from './policies/order.policy';
+import { allocateOrderLines, LineAllocation } from './pricing/order-pricing';
 
 interface ResolvedOrderItem {
   variant_id: string;
+  // Not persisted on the item; only used to match scoped discount codes.
+  product_id: string;
+  category_id: string;
   productName: string;
   variantName: string | null;
   unitPrice: number;
   quantity: number;
   total: number;
+}
+
+interface OrderPricing {
+  // Codes in the order they were applied, with what each took off.
+  applied: { discount: Discount; amount: number }[];
+  discountTotal: number;
+  // Aligned with the resolved items.
+  lines: LineAllocation[];
 }
 
 @Injectable()
@@ -89,9 +102,16 @@ export class OrdersService {
     const { subtotal, resolvedItems, variantMap } =
       await this.resolveOrderItems(dto.items);
 
-    const { discountAmount, discountId } = await this.resolveDiscount(
+    const discount = await this.resolveDiscount(
       dto.discountCode,
       subtotal,
+      userId,
+    );
+    const shippingFee = this.configService.getAppConfig().shippingFlatFee;
+    const pricing = await this.priceOrder(
+      resolvedItems,
+      discount ? [discount] : [],
+      shippingFee,
     );
 
     const order = await this.dataSource.transaction((manager) =>
@@ -101,8 +121,8 @@ export class OrdersService {
         resolvedItems,
         variantMap,
         subtotal,
-        discountAmount,
-        discountId,
+        shippingFee,
+        pricing,
         notes: dto.notes,
       }),
     );
@@ -133,9 +153,16 @@ export class OrdersService {
 
     const { subtotal, resolvedItems, variantMap } =
       await this.resolveOrderItems(items);
-    const { discountAmount, discountId } = await this.resolveDiscount(
+    const discount = await this.resolveDiscount(
       dto.discountCode,
       subtotal,
+      userId,
+    );
+    const shippingFee = this.configService.getAppConfig().shippingFlatFee;
+    const pricing = await this.priceOrder(
+      resolvedItems,
+      discount ? [discount] : [],
+      shippingFee,
     );
 
     const order = await this.dataSource.transaction((manager) =>
@@ -145,8 +172,8 @@ export class OrdersService {
         resolvedItems,
         variantMap,
         subtotal,
-        discountAmount,
-        discountId,
+        shippingFee,
+        pricing,
         notes: dto.notes,
         cartId: cart.id,
       }),
@@ -194,6 +221,8 @@ export class OrdersService {
 
       resolvedItems.push({
         variant_id: variant.id,
+        product_id: variant.product.id,
+        category_id: variant.product.category_id,
         productName: variant.product.name,
         variantName: variant.name,
         unitPrice,
@@ -212,19 +241,76 @@ export class OrdersService {
   private async resolveDiscount(
     discountCode: string | undefined,
     subtotal: number,
-  ): Promise<{ discountAmount: number; discountId?: string }> {
-    if (!discountCode) return { discountAmount: 0 };
+    userId: string,
+  ): Promise<Discount | undefined> {
+    if (!discountCode) return undefined;
+    return this.discountsService.resolveCode(discountCode, subtotal, userId);
+  }
 
-    const discountEntity = await this.discountsService.resolveCode(
-      discountCode,
-      subtotal,
-    );
-    const discountAmount = this.discountsService.computeAmount(
-      discountEntity,
-      subtotal,
+  // Applies the codes one after another, each against what the previous
+  // ones left on every line, then spreads discount and shipping per line.
+  // Running codes on the remainder (rather than each on the full lines)
+  // means stacked codes can never take a line below 0.
+  private async priceOrder(
+    resolvedItems: ResolvedOrderItem[],
+    discounts: Discount[],
+    shippingFee: number,
+    manager?: EntityManager,
+  ): Promise<OrderPricing> {
+    const remaining = resolvedItems.map((item) => new Big(item.total));
+    const lineDiscounts = resolvedItems.map(() => new Big(0));
+    const applied: OrderPricing['applied'] = [];
+
+    for (const discount of discounts) {
+      const quote = await this.discountsService.quote(
+        discount,
+        resolvedItems.map((item, i) => ({
+          productId: item.product_id,
+          categoryId: item.category_id,
+          amount: toMoney(remaining[i]),
+        })),
+        manager,
+      );
+      quote.lineAmounts.forEach((amount, i) => {
+        remaining[i] = remaining[i].minus(amount);
+        lineDiscounts[i] = lineDiscounts[i].plus(amount);
+      });
+      applied.push({ discount, amount: quote.amount });
+    }
+
+    const discountTotal = toMoney(
+      lineDiscounts.reduce((sum, d) => sum.plus(d), new Big(0)),
     );
 
-    return { discountAmount, discountId: discountEntity.id };
+    return {
+      applied,
+      discountTotal,
+      lines: allocateOrderLines(
+        resolvedItems.map((item) => item.total),
+        lineDiscounts.map((d) => toMoney(d)),
+        shippingFee,
+      ),
+    };
+  }
+
+  private toOrderItems(
+    manager: EntityManager,
+    orderId: string,
+    resolvedItems: ResolvedOrderItem[],
+    lines: LineAllocation[],
+  ): OrderItem[] {
+    return resolvedItems.map((item, i) =>
+      manager.create(OrderItem, {
+        order_id: orderId,
+        variant_id: item.variant_id,
+        productName: item.productName,
+        variantName: item.variantName,
+        unitPrice: item.unitPrice,
+        quantity: item.quantity,
+        total: item.total,
+        ...lines[i],
+      }),
+    );
   }
 
   private async persistOrder(
@@ -235,8 +321,8 @@ export class OrdersService {
       resolvedItems: ResolvedOrderItem[];
       variantMap: Map<string, ProductVariant>;
       subtotal: number;
-      discountAmount: number;
-      discountId?: string;
+      shippingFee: number;
+      pricing: OrderPricing;
       notes?: string;
       cartId?: string;
     },
@@ -252,9 +338,9 @@ export class OrdersService {
       await this.decrementStock(manager, item, params.variantMap);
     }
 
-    const shippingFee = this.configService.getAppConfig().shippingFlatFee;
+    const { shippingFee, pricing } = params;
     const total = toMoney(
-      new Big(params.subtotal).plus(shippingFee).minus(params.discountAmount),
+      new Big(params.subtotal).plus(shippingFee).minus(pricing.discountTotal),
     );
 
     const savedOrder = await this.saveOrderWithUniqueNumber(manager, {
@@ -263,27 +349,32 @@ export class OrdersService {
       status: OrderStatus.PENDING,
       subtotal: params.subtotal,
       shippingFee,
-      discount: params.discountAmount,
+      discount: pricing.discountTotal,
       total,
       notes: params.notes ?? null,
     });
 
     await manager.save(
       OrderItem,
-      params.resolvedItems.map((item) =>
-        manager.create(OrderItem, { ...item, order_id: savedOrder.id }),
+      this.toOrderItems(
+        manager,
+        savedOrder.id,
+        params.resolvedItems,
+        pricing.lines,
       ),
     );
 
-    if (params.discountId) {
+    for (const { discount, amount } of pricing.applied) {
       await manager.query(
         `INSERT INTO "order_discount" ("order_id", "discount_id") VALUES ($1, $2)`,
-        [savedOrder.id, params.discountId],
+        [savedOrder.id, discount.id],
       );
-      await this.discountsService.incrementUsedCount(
-        manager,
-        params.discountId,
-      );
+      await this.discountsService.redeem(manager, {
+        discount,
+        orderId: savedOrder.id,
+        userId: params.userId,
+        amount,
+      });
     }
 
     if (params.cartId) {
@@ -419,28 +510,36 @@ export class OrdersService {
           await this.decrementStock(manager, item, variantMap);
         }
 
-        let discountAmount = new Big(0);
         for (const discount of order.discounts) {
           this.orderPolicy.assertStillMeetsDiscountMinimum(discount, subtotal);
-          discountAmount = discountAmount.plus(
-            this.discountsService.computeAmount(discount, subtotal),
+        }
+        const pricing = await this.priceOrder(
+          resolvedItems,
+          order.discounts,
+          Number(order.shippingFee),
+          manager,
+        );
+        for (const { discount, amount } of pricing.applied) {
+          await this.discountsService.updateRedemptionAmount(
+            manager,
+            order.id,
+            discount.id,
+            amount,
           );
         }
 
         await manager.delete(OrderItem, { order_id: order.id });
         await manager.save(
           OrderItem,
-          resolvedItems.map((item) =>
-            manager.create(OrderItem, { ...item, order_id: order.id }),
-          ),
+          this.toOrderItems(manager, order.id, resolvedItems, pricing.lines),
         );
 
         order.subtotal = subtotal;
-        order.discount = toMoney(discountAmount);
+        order.discount = pricing.discountTotal;
         order.total = toMoney(
           new Big(subtotal)
             .plus(Number(order.shippingFee))
-            .minus(discountAmount),
+            .minus(pricing.discountTotal),
         );
       }
 
@@ -496,6 +595,7 @@ export class OrdersService {
         const fromStatus = order.status;
 
         await this.restoreStock(order, manager);
+        await this.discountsService.releaseForOrder(manager, order.id);
 
         order.status = OrderStatus.CANCELLED;
         await manager.save(Order, order);
@@ -544,6 +644,7 @@ export class OrdersService {
           // returned. Paid orders must go through the refund flow instead.
           await this.assertNotPaid(manager, order.id);
           await this.restoreStock(order, manager);
+          await this.discountsService.releaseForOrder(manager, order.id);
         }
 
         order.status = dto.status;

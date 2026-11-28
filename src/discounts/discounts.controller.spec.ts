@@ -37,8 +37,10 @@ describe('Discount controllers', () => {
     expect(Reflect.getMetadata(GUARDS_METADATA, DiscountsController)).toEqual([
       JwtAuthGuard,
     ]);
-    await expect(controller.validate(dto)).resolves.toBe('validate');
-    expect(service.validate).toHaveBeenCalledWith(dto);
+    await expect(
+      controller.validate({ id: 'user-1' } as never, dto),
+    ).resolves.toBe('validate');
+    expect(service.validate).toHaveBeenCalledWith(dto, 'user-1');
   });
 
   describe('AdminDiscountsController', () => {

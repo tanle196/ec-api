@@ -22,6 +22,7 @@
 - A refund request cannot list the same `order_item_id` more than once (`400`).
 - Every `order_item_id` in a refund request must belong to the order tied to the payment (`400`).
 - Per-item refundable quantity = `orderItem.quantity` − sum of quantities already refunded via `succeeded` refunds for that item; requesting more than this is rejected (`400`).
+- Refund amount per item comes from the order item's `paidAmount` (what was actually paid for that line, including its discount and shipping shares). Units are priced as a slice after the quantities already refunded or reserved on that line (`amountForUnits`), so refunding a line in several goes adds up to exactly its `paidAmount`, and refunding every item adds up to exactly `payment.amount`.
 - Total refunded amount (already-succeeded + new request) cannot exceed `payment.amount` (`400`, "Refund amount exceeds the remaining refundable balance").
 - Refunding via Stripe requires the payment to already have a `transactionId` (PaymentIntent id); otherwise rejected (`400`).
 - If the gateway refund call fails, the `Refund` record is persisted with status `failed` and the error message, and the error is re-thrown to the caller (payment status is left unchanged).

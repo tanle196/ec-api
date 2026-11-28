@@ -44,4 +44,30 @@ export class DiscountPolicy {
         `Minimum order value for this code is ${discount.minOrderValue}`,
       );
   }
+
+  // `activeRedemptions` = this customer's current (non-released) uses.
+  assertWithinPerUserLimit(
+    discount: Pick<Discount, 'perUserLimit'>,
+    activeRedemptions: number,
+  ): void {
+    if (
+      discount.perUserLimit !== null &&
+      activeRedemptions >= discount.perUserLimit
+    )
+      throw new BadRequestException(
+        'You have already used this discount code the maximum number of times',
+      );
+  }
+
+  // A scoped code needs at least one qualifying line with something left
+  // to discount.
+  assertAppliesToOrder(
+    discount: Pick<Discount, 'code'>,
+    eligibleAmount: number,
+  ): void {
+    if (eligibleAmount <= 0)
+      throw new BadRequestException(
+        `Discount code "${discount.code}" does not apply to any item in this order`,
+      );
+  }
 }
